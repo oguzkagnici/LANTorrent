@@ -228,7 +228,7 @@ async def main():
     else:
         # Check if server is running
         if not os.path.exists(SOCKET_PATH):
-            logger.error("LAN Torrent is not running. Start it with 'python -m lantorrent start'")
+            logger.error("LAN Torrent is not running. Start it with 'python3 -m lantorrent start'")
             return
 
         try:
@@ -348,7 +348,7 @@ async def handle_list_command(app):
         #output.append(f"{hash_short:<10} {size_str:<10} {len(info['peers']):<6} {info['name']}")
         output.append(f"{file_hash:<40} {size_str:<10} {len(info['peers']):<6} {info['name']}")
 
-    output.append("\nTo download: python -m lantorrent download <hash>")
+    output.append("\nTo download: python3 -m lantorrent download <hash>")
 
     return {
         'success': True,
@@ -363,7 +363,7 @@ async def handle_download_command(app, args):
     if result:
         return {
             'success': True,
-            'output': f"Download started for file {file_hash}\nUse 'python -m lantorrent status' to check progress"
+            'output': f"Download started for file {file_hash}\nUse 'python3 -m lantorrent status' to check progress"
         }
     else:
         return {
