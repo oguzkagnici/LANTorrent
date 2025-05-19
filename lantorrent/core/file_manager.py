@@ -2,6 +2,7 @@
 import hashlib
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -18,6 +19,7 @@ class FileManager:
         self.download_dir = Path(download_dir)
         self.shared_files: Dict[str, FileInfo] = {}
         self.downloading_files: Dict[str, FileInfo] = {}
+        self.downloaded_files: Dict[str, (FileInfo, float)] = {}
         self.completed_chunks: Dict[str, Set[int]] = {}  # file_hash -> set of completed chunk indices
         self.active_requests: Dict[Tuple[str, int], ChunkRequest] = {}  # (file_hash, chunk_index) -> request
 
@@ -114,11 +116,11 @@ class FileManager:
 
         # Check if the download is complete
         if len(self.completed_chunks[file_hash]) == file_info.chunks:
-            self._finalize_download(file_hash)
+            self._finalize_download(file_hash, getattr(self, 'auto_share', True))
 
         return True
 
-    def _finalize_download(self, file_hash: str) -> None:
+    def _finalize_download(self, file_hash: str, auto_share: bool = True) -> None:
         """Finalize a completed download."""
         file_info = self.downloading_files[file_hash]
         temp_file_path = self.download_dir / f"{file_info.name}.part"
@@ -129,7 +131,19 @@ class FileManager:
 
         # Update file status
         file_info.complete = True
-        self.shared_files[file_hash] = file_info
+        self.downloaded_files[file_hash] = (file_info, time.time())
+
+        if auto_share:
+            self.shared_files[file_hash] = file_info
+            # Copy the file to the shared directory
+            shared_path = self.share_dir / file_info.name
+            try:
+                import shutil
+                shutil.copy2(final_file_path, shared_path)
+                logger.info(f"File automatically shared: {file_info.name}")
+            except Exception as e:
+                logger.error(f"Error sharing downloaded file: {e}")
+
         del self.downloading_files[file_hash]
         del self.completed_chunks[file_hash]
 

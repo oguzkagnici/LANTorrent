@@ -275,7 +275,7 @@ class TransferProtocol:
         except Exception as e:
             logger.debug(f"Error sending stats to peer {peer.id}: {e}")
 
-    async def download_file(self, file_hash: str) -> bool:
+    async def download_file(self, file_hash: str, auto_share: bool = True) -> bool:
         """Download a file from the network."""
         # Find peers that have this file
         available_peers = []
@@ -301,6 +301,7 @@ class TransferProtocol:
             return False
 
         # Start the download
+        self.file_manager.auto_share = auto_share
         self.file_manager.start_file_download(file_info)
 
         # Create chunk requests for all chunks
