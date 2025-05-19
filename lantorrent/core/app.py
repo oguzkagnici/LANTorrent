@@ -321,7 +321,7 @@ async def handle_list_command(app):
     output = []
     output.append("\nAvailable files on the network:")
     output.append("=" * 70)
-    output.append(f"{'Hash':<10} {'Size':<10} {'Peers':<6} Name")
+    output.append(f"{'Hash':<40} {'Size':<10} {'Peers':<6} Name")
     output.append("-" * 70)
 
     # Collect files from all peers
