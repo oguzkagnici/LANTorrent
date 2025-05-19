@@ -48,7 +48,7 @@ class LANTorrent:
         transfer_task = asyncio.create_task(self.transfer.start())
 
         self.tasks = [discovery_task, transfer_task]
-        logger.info("LAN Torrent started")
+        #logger.info("LAN Torrent started")
 
     async def stop(self):
         """Stop all system components."""
@@ -68,9 +68,9 @@ class LANTorrent:
         self.tasks = []
         logger.info("LAN Torrent stopped")
 
-    async def download_file(self, file_hash: str) -> bool:
+    async def download_file(self, file_hash: str, auto_share: bool = True) -> bool:
         """Start downloading a file."""
-        return await self.transfer.download_file(file_hash)
+        return await self.transfer.download_file(file_hash, auto_share)
 
     def get_status(self) -> dict:
         """Get the current status of the application."""
@@ -81,6 +81,16 @@ class LANTorrent:
                 'progress': len(self.file_manager.completed_chunks.get(file_hash, set())) / file_info.chunks
             }
             for file_hash, file_info in self.file_manager.downloading_files.items()
+        }
+
+        downloaded = {
+            file_hash: {
+                'name': file_info.name,
+                'size': file_info.size,
+                'downloaded_at': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(downloaded_at))
+
+            }
+            for file_hash, (file_info, downloaded_at) in self.file_manager.downloaded_files.items()
         }
 
         shared = {
@@ -107,7 +117,8 @@ class LANTorrent:
             'address': f"{self.peer_manager.my_ip}:{self.peer_manager.my_port}",
             'peers': peers,
             'shared_files': shared,
-            'downloading': downloading
+            'downloading': downloading,
+            'downloaded': downloaded
         }
 
 
@@ -142,6 +153,8 @@ async def main():
     # Download command
     download_parser = subparsers.add_parser('download', help='Download a file')
     download_parser.add_argument('hash', type=str, help='Hash of the file to download')
+    download_parser.add_argument('--no-share', action='store_true',
+                                 help='Do not automatically share the downloaded file')
 
     # Status command
     status_parser = subparsers.add_parser('status', help='Show status information')
@@ -358,7 +371,8 @@ async def handle_list_command(app):
 
 async def handle_download_command(app, args):
     file_hash = args['hash']
-    result = await app.download_file(file_hash)
+    auto_share = not args.get('no_share', False)
+    result = await app.download_file(file_hash, auto_share)
 
     if result:
         return {
@@ -403,7 +417,13 @@ async def handle_status_command(app):
         size_str = f"{finfo['size'] / 1024 / 1024:.1f}MB" if finfo[
                                                                  'size'] >= 1024 * 1024 else f"{finfo['size'] / 1024:.1f}KB"
         progress_str = f"{finfo['progress'] * 100:.1f}%"
-        output.append(f"{fid[:8]}... {size_str} {progress_str} {finfo['name']}")
+        output.append(f"{fid[:8]}... {size_str} {progress_str} {finfo['name']} [in progress]")
+
+    # Completed downloads
+    for fid, finfo in status['downloaded'].items():
+        size_str = f"{finfo['size'] / 1024 / 1024:.1f}MB" if finfo[
+                                                                 'size'] >= 1024 * 1024 else f"{finfo['size'] / 1024:.1f}KB"
+        output.append(f"{fid[:8]}... {size_str} 100.0% {finfo['name']} [completed at {finfo['downloaded_at']}]")
 
     return {
         'success': True,
