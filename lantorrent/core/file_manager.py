@@ -69,9 +69,21 @@ class FileManager:
         except Exception as e:
             logger.error(f"Error adding shared file {file_path}: {e}")
 
-    def get_shared_file_list(self) -> List[str]:
-        """Get a list of file hashes for all shared files."""
-        return list(self.shared_files.keys())
+    def get_shared_file_list(self) -> dict:
+        """Get a dictionary of shared files with metadata.
+
+        Returns:
+            A dictionary mapping file hashes to file metadata.
+        """
+        shared_files = {}
+        for file_hash, file_info in self.shared_files.items():
+            if file_info.complete:
+                shared_files[file_hash] = {
+                    'name': file_info.name,
+                    'size': file_info.size
+                }
+        return shared_files
+
 
     def start_file_download(self, file_info: FileInfo) -> None:
         """Start downloading a file."""

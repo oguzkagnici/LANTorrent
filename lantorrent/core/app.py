@@ -340,9 +340,13 @@ async def handle_list_command(app):
     # Collect files from all peers
     all_files = {}
     for peer_id, peer in app.peer_manager.peers.items():
-        for file_hash in peer.files:
+        for file_hash, file_metadata in peer.files.items():
             if file_hash not in all_files:
-                all_files[file_hash] = {'peers': set(), 'name': 'Unknown', 'size': 0}
+                all_files[file_hash] = {
+                    'peers': set(),
+                    'name': file_metadata.get('name', 'Unknown'),
+                    'size': file_metadata.get('size', 0)
+                }
             all_files[file_hash]['peers'].add(peer_id)
 
     # Add local files
