@@ -196,6 +196,16 @@ async def main():
             await app.start()
             logger.info("LAN Torrent started. Press Ctrl+C to stop.")
 
+            print("\n" + "=" * 70)
+            print("LAN Torrent service is now running in the background.")
+            print("Open a new terminal window and run the following commands to use it:")
+            print("  python3 -m lantorrent list          - List available files")
+            print("  python3 -m lantorrent share path/to/file  - Share a file")
+            print("  python3 -m lantorrent download <hash> - Download a file")
+            print("  python3 -m lantorrent status        - Show peer/file status")
+            print("For more information, run: python3 -m lantorrent --help")
+            print("=" * 70 + "\n")
+
             # Function to handle incoming command connections
             async def handle_command(reader, writer):
                 try:
@@ -404,7 +414,7 @@ async def handle_status_command(app):
     output.append("-" * 70)
     for pid, pinfo in status['peers'].items():
         output.append(f"{pid}: {pinfo['ip']}:{pinfo['port']} - {pinfo['files']} files - "
-                      f"Up: {pinfo['upload'] / 1024:.1f}KB, Down: {pinfo['download'] / 1024:.1f}KB")
+                      f"Uploaded To: {pinfo['upload'] / 1024:.1f}KB, Downloaded From: {pinfo['download'] / 1024:.1f}KB")
 
     # Shared files
     output.append("\nShared Files:")
