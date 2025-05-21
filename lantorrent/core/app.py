@@ -12,6 +12,7 @@ from .file_manager import FileManager
 from .peer_manager import PeerManager
 from .transfer import TransferProtocol
 from .models import FileInfo
+from .utils import format_size
 
 logger = logging.getLogger('lantorrent.app')
 
@@ -370,8 +371,9 @@ async def handle_list_command(app):
     # Print the list
     for file_hash, info in all_files.items():
         #hash_short = file_hash[:8] + "..."
-        size_str = f"{info['size'] / 1024 / 1024:.1f}MB" if info[
-                                                                'size'] >= 1024 * 1024 else f"{info['size'] / 1024:.1f}KB"
+        #size_str = f"{info['size'] / 1024 / 1024:.1f}MB" if info[
+        #                                                        'size'] >= 1024 * 1024 else f"{info['size'] / 1024:.1f}KB"
+        size_str = format_size(info['size'])
         #output.append(f"{hash_short:<10} {size_str:<10} {len(info['peers']):<6} {info['name']}")
         output.append(f"{file_hash:<40} {size_str:<10} {len(info['peers']):<6} {info['name']}")
 
@@ -414,29 +416,32 @@ async def handle_status_command(app):
     output.append("-" * 70)
     for pid, pinfo in status['peers'].items():
         output.append(f"{pid}: {pinfo['ip']}:{pinfo['port']} - {pinfo['files']} files - "
-                      f"Up (to peer): {pinfo['upload'] / 1024:.1f}KB, Down (from peer): {pinfo['download'] / 1024:.1f}KB")
+                      f"Up (to peer): {format_size(pinfo['upload'])}, Down (from peer): {format_size(pinfo['download'])}")
 
     # Shared files
     output.append("\nShared Files:")
     output.append("-" * 70)
     for fid, finfo in status['shared_files'].items():
-        size_str = f"{finfo['size'] / 1024 / 1024:.1f}MB" if finfo[
-                                                                 'size'] >= 1024 * 1024 else f"{finfo['size'] / 1024:.1f}KB"
+        #size_str = f"{finfo['size'] / 1024 / 1024:.1f}MB" if finfo[
+        #                                                         'size'] >= 1024 * 1024 else f"{finfo['size'] / 1024:.1f}KB"
+        size_str = format_size(finfo['size'])
         output.append(f"{fid[:8]}... {size_str} {finfo['name']}")
 
     # Downloads
     output.append("\nDownloads:")
     output.append("-" * 70)
     for fid, finfo in status['downloading'].items():
-        size_str = f"{finfo['size'] / 1024 / 1024:.1f}MB" if finfo[
-                                                                 'size'] >= 1024 * 1024 else f"{finfo['size'] / 1024:.1f}KB"
+        #size_str = f"{finfo['size'] / 1024 / 1024:.1f}MB" if finfo[
+        #                                                         'size'] >= 1024 * 1024 else f"{finfo['size'] / 1024:.1f}KB"
+        size_str = format_size(finfo['size'])
         progress_str = f"{finfo['progress'] * 100:.1f}%"
         output.append(f"{fid[:8]}... {size_str} {progress_str} {finfo['name']} [in progress]")
 
     # Completed downloads
     for fid, finfo in status['downloaded'].items():
-        size_str = f"{finfo['size'] / 1024 / 1024:.1f}MB" if finfo[
-                                                                 'size'] >= 1024 * 1024 else f"{finfo['size'] / 1024:.1f}KB"
+        #size_str = f"{finfo['size'] / 1024 / 1024:.1f}MB" if finfo[
+        #                                                         'size'] >= 1024 * 1024 else f"{finfo['size'] / 1024:.1f}KB"
+        size_str = format_size(finfo['size'])
         output.append(f"{fid[:8]}... {size_str} 100.0% {finfo['name']} [completed at {finfo['downloaded_at']}]")
 
     return {
