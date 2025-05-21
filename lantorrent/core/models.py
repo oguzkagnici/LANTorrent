@@ -65,6 +65,6 @@ class PeerInfo:
     ip: str
     port: int
     last_seen: float
-    files: List[str]
+    files: dict[str, FileInfo]
     upload_bytes: int = 0
     download_bytes: int = 0

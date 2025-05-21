@@ -134,7 +134,7 @@ class MulticastDiscovery:
         peer_id = message.get('peer_id')
         ip = message.get('ip')
         port = message.get('port')
-        files = message.get('files', [])
+        files = message.get('files', {})
 
         # Update the peer information
         self.peer_manager.add_or_update_peer(peer_id, ip, port, files)

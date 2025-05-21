@@ -6,7 +6,7 @@ import uuid
 from typing import Dict, List
 
 import logging
-from .models import PeerInfo, PEER_TIMEOUT, TCP_BASE_PORT
+from .models import PeerInfo, PEER_TIMEOUT, TCP_BASE_PORT, FileInfo
 
 logger = logging.getLogger('lantorrent.peer_manager')
 
@@ -34,7 +34,7 @@ class PeerManager:
             # Fallback to a generic local IP
             return "127.0.0.1"
 
-    def add_or_update_peer(self, peer_id: str, ip: str, port: int, files: List[str] = None) -> None:
+    def add_or_update_peer(self, peer_id: str, ip: str, port: int, files: dict[str, FileInfo] = None) -> None:
         """Add a new peer or update an existing one."""
         if peer_id == self.my_id:
             return
@@ -50,7 +50,7 @@ class PeerManager:
                 ip=ip,
                 port=port,
                 last_seen=now,
-                files=files or []
+                files=files or {}
             )
             logger.info(f"New peer discovered: {peer_id} at {ip}:{port}")
 
