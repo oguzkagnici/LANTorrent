@@ -58,7 +58,6 @@ class Peer:
     upload_bytes: int = 0
     download_bytes: int = 0
 
-# Added the PeerInfo class which was missing
 @dataclass
 class PeerInfo:
     """Detailed information about a peer."""
