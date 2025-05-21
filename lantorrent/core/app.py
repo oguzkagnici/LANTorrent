@@ -414,7 +414,7 @@ async def handle_status_command(app):
     output.append("-" * 70)
     for pid, pinfo in status['peers'].items():
         output.append(f"{pid}: {pinfo['ip']}:{pinfo['port']} - {pinfo['files']} files - "
-                      f"Uploaded To: {pinfo['upload'] / 1024:.1f}KB, Downloaded From: {pinfo['download'] / 1024:.1f}KB")
+                      f"Up (to peer): {pinfo['upload'] / 1024:.1f}KB, Down (from peer): {pinfo['download'] / 1024:.1f}KB")
 
     # Shared files
     output.append("\nShared Files:")
