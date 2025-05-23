@@ -42,9 +42,8 @@ class FileManager:
             file_size = file_path.stat().st_size
             num_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
 
-            # Calculate the file hash (using the file name for simplicity)
-            # In a production system, you'd use the actual file content
-            file_hash = hashlib.sha1(str(file_path).encode()).hexdigest()
+            # Calculate the file hash using content
+            file_hash = self._calculate_file_hash(file_path)
 
             # Calculate chunk hashes
             chunk_hashes = []
@@ -68,6 +67,15 @@ class FileManager:
 
         except Exception as e:
             logger.error(f"Error adding shared file {file_path}: {e}")
+
+    def _calculate_file_hash(self, file_path: Path) -> str:
+        """Calculate a hash based on file content rather than path."""
+        hasher = hashlib.sha1()
+        with open(file_path, 'rb') as f:
+            # Read and update hash in chunks to handle large files
+            for chunk in iter(lambda: f.read(65536), b''):
+                hasher.update(chunk)
+        return hasher.hexdigest()
 
     def get_shared_file_list(self) -> dict:
         """Get a dictionary of shared files with metadata.
