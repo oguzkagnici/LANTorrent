@@ -80,7 +80,7 @@ class TransferProtocol:
         file_hash = message.get('file_hash')
 
         if file_hash in self.file_manager.shared_files:
-            file_info = self.file_manager.shared_files[file_hash]
+            file_info = self.file_manager.shared_files[file_hash][0]
 
             response = {
                 'type': MessageType.FILE_LIST.value,

@@ -17,7 +17,7 @@ class FileManager:
     def __init__(self, share_dir: str, download_dir: str):
         self.share_dir = Path(share_dir)
         self.download_dir = Path(download_dir)
-        self.shared_files: Dict[str, FileInfo] = {}
+        self.shared_files: Dict[str, (FileInfo, Path)] = {}
         self.downloading_files: Dict[str, FileInfo] = {}
         self.downloaded_files: Dict[str, (FileInfo, float)] = {}
         self.completed_chunks: Dict[str, Set[int]] = {}  # file_hash -> set of completed chunk indices
@@ -34,9 +34,9 @@ class FileManager:
         """Scan the share directory for files to share."""
         for file_path in self.share_dir.glob('**/*'):
             if file_path.is_file():
-                self._add_shared_file(file_path)
+                self._add_shared_file(file_path, file_path.name)
 
-    def _add_shared_file(self, file_path: Path) -> None:
+    def _add_shared_file(self, file_path: Path, file_name: str) -> None:
         """Add a file to the list of shared files."""
         try:
             file_size = file_path.stat().st_size
@@ -55,14 +55,16 @@ class FileManager:
                     chunk_hash = hashlib.sha1(chunk_data).hexdigest()
                     chunk_hashes.append(chunk_hash)
 
-            self.shared_files[file_hash] = FileInfo(
-                name=file_path.name,
+            file_info = FileInfo(
+                name=file_name,
                 size=file_size,
                 chunks=num_chunks,
                 hash=file_hash,
                 chunks_hash=chunk_hashes,
                 complete=True
             )
+
+            self.shared_files[file_hash] = (file_info, file_path)
             logger.info(f"Added shared file: {file_path.name} ({file_hash})")
 
         except Exception as e:
@@ -84,7 +86,7 @@ class FileManager:
             A dictionary mapping file hashes to file metadata.
         """
         shared_files = {}
-        for file_hash, file_info in self.shared_files.items():
+        for file_hash, (file_info, _) in self.shared_files.items():
             if file_info.complete:
                 shared_files[file_hash] = {
                     'name': file_info.name,
@@ -144,7 +146,16 @@ class FileManager:
         """Finalize a completed download."""
         file_info = self.downloading_files[file_hash]
         temp_file_path = self.download_dir / f"{file_info.name}.part"
+
+        # Handle filename conflicts for downloads
+        name_base, ext = os.path.splitext(file_info.name)
         final_file_path = self.download_dir / file_info.name
+        counter = 1
+
+        while final_file_path.exists():
+            new_name = f"{name_base}_{counter}{ext}"
+            final_file_path = self.download_dir / new_name
+            counter += 1
 
         # Rename the partial file to the final file
         os.rename(temp_file_path, final_file_path)
@@ -154,28 +165,44 @@ class FileManager:
         self.downloaded_files[file_hash] = (file_info, time.time())
 
         if auto_share:
-            self.shared_files[file_hash] = file_info
             # Copy the file to the shared directory
-            shared_path = self.share_dir / file_info.name
             try:
                 import shutil
+                shared_path = self.share_dir / file_info.name
+                counter = 1
+                name_base, ext = os.path.splitext(file_info.name)
+
+                # Handle filename conflicts in the share directory
+                while shared_path.exists():
+                    new_name = f"{name_base}_{counter}{ext}"
+                    shared_path = self.share_dir / new_name
+                    counter += 1
+
                 shutil.copy2(final_file_path, shared_path)
-                logger.info(f"File automatically shared: {file_info.name}")
+
+                # Add to shared files with the actual path
+                self.shared_files[file_hash] = (file_info, shared_path)
+                logger.info(f"File automatically shared: {file_info.name}" +
+                            (f" (stored as {shared_path.name})" if shared_path.name != file_info.name else ""))
             except Exception as e:
                 logger.error(f"Error sharing downloaded file: {e}")
 
         del self.downloading_files[file_hash]
         del self.completed_chunks[file_hash]
 
-        logger.info(f"Download completed for {file_info.name}")
+        downloaded_name = final_file_path.name
+        log_msg = f"Download completed for {file_info.name}"
+        if downloaded_name != file_info.name:
+            log_msg += f" (saved as {downloaded_name})"
+        logger.info(log_msg)
 
     def get_chunk(self, file_hash: str, chunk_index: int) -> Optional[bytes]:
         """Get a chunk from a shared file."""
         if file_hash not in self.shared_files:
             return None
 
-        file_info = self.shared_files[file_hash]
-        file_path = self.share_dir / file_info.name
+        file_info = self.shared_files[file_hash][0]
+        file_path = self.shared_files[file_hash][1]
 
         if not file_path.exists() or chunk_index >= file_info.chunks:
             return None

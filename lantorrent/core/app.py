@@ -99,7 +99,7 @@ class LANTorrent:
                 'name': file_info.name,
                 'size': file_info.size
             }
-            for file_hash, file_info in self.file_manager.shared_files.items()
+            for file_hash, (file_info, _) in self.file_manager.shared_files.items()
         }
 
         peers = {
@@ -322,22 +322,46 @@ async def process_command(app, command_data):
 
 async def handle_share_command(app, args):
     import shutil
+    import os
 
     src_path = Path(args['file'])
     if not src_path.exists():
         return {'success': False, 'error': f"File not found: {src_path}"}
 
-    dst_path = Path(args['share_dir']) / src_path.name
+    if not src_path.is_file():
+        return {'success': False, 'error': f"Not a file: {src_path}"}
+
+    # Get original filename
+    original_name = src_path.name
+    name_base, ext = os.path.splitext(original_name)
+
+    # Create share directory if needed
     Path(args['share_dir']).mkdir(exist_ok=True, parents=True)
 
+    # Generate a unique filename to avoid conflicts in the filesystem
+    dst_path = Path(args['share_dir']) / original_name
+    counter = 1
+
+    while dst_path.exists():
+        # Create a unique filename for storage
+        new_name = f"{name_base}_{counter}{ext}"
+        dst_path = Path(args['share_dir']) / new_name
+        counter += 1
+
+    # Copy the file with the unique name
     shutil.copy2(src_path, dst_path)
 
     # Force scan of shared files
-    app.file_manager._scan_shared_files()
+    app.file_manager._add_shared_file(dst_path, original_name)
+
+    # Success message
+    message = f"File shared: {original_name}"
+    if dst_path.name != original_name:
+        message += f" (stored as {dst_path.name})"
 
     return {
         'success': True,
-        'output': f"File shared: {src_path.name}\nPath: {dst_path}"
+        'output': message
     }
 
 
@@ -361,7 +385,7 @@ async def handle_list_command(app):
             all_files[file_hash]['peers'].add(peer_id)
 
     # Add local files
-    for file_hash, file_info in app.file_manager.shared_files.items():
+    for file_hash, (file_info, _) in app.file_manager.shared_files.items():
         if file_hash not in all_files:
             all_files[file_hash] = {'peers': set(), 'name': file_info.name, 'size': file_info.size}
         else:
