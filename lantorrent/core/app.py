@@ -69,6 +69,29 @@ class LANTorrent:
         self.tasks = []
         logger.info("LAN Torrent stopped")
 
+    async def add_file_to_share(self, file_path_str: str) -> Optional[FileInfo]:
+        """Adds a file to the shared files list and announces it."""
+        file_path = Path(file_path_str)
+        if not file_path.exists() or not file_path.is_file():
+            logger.error(f"File not found or is not a file: {file_path_str}")
+            return None
+        
+        # Check if file is within the share_dir, if strict containment is desired.
+        # For simplicity, current FileManager.add_shared_file might copy it or handle it.
+        # If it's not copied, ensure the path is accessible.
+        
+        file_info = self.file_manager.add_shared_file(file_path)
+        if file_info:
+            logger.info(f"GUI: Sharing new file: {file_info.name} ({file_info.file_hash})")
+            if self.running and self.discovery: # Ensure discovery is running
+                # Announce all files, including the new one
+                await self.discovery.announce_files() 
+                logger.info(f"GUI: Announced files after adding {file_info.name}")
+            return file_info
+        else:
+            logger.error(f"GUI: Failed to add file to share: {file_path_str}")
+            return None
+
     async def download_file(self, file_hash: str, auto_share: bool = True) -> bool:
         """Start downloading a file."""
         return await self.transfer.download_file(file_hash, auto_share)
