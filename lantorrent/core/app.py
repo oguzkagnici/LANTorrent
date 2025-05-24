@@ -160,6 +160,9 @@ async def main():
     # Status command
     status_parser = subparsers.add_parser('status', help='Show status information')
 
+    # Exit command
+    exit_parser = subparsers.add_parser('exit', help='Exit the LAN Torrent service')
+
     args = parser.parse_args()
 
     # Set log level
@@ -313,6 +316,8 @@ async def process_command(app, command_data):
             return await handle_download_command(app, args)
         elif command == 'status':
             return await handle_status_command(app)
+        elif command == 'exit':
+            return await handle_exit_command(app)
         else:
             return {'success': False, 'error': f"Unknown command: {command}"}
     except Exception as e:
@@ -472,3 +477,36 @@ async def handle_status_command(app):
         'success': True,
         'output': "\n".join(output)
     }
+
+async def handle_exit_command(app):
+    """Handle the exit command to gracefully shut down the application."""
+    output = "Shutting down gracefully, please wait..."
+
+    # Schedule the shutdown to happen after this command handler returns
+    loop = asyncio.get_running_loop()
+    loop.call_soon(lambda: asyncio.create_task(shutdown_application(app)))
+
+    return {
+        'success': True,
+        'output': output
+    }
+
+
+async def shutdown_application(app):
+    """Perform the actual shutdown sequence."""
+    # Allow a short delay for the command response to be sent
+    await asyncio.sleep(0.5)
+
+    # Use the existing stop method
+    await app.stop()
+
+    # Remove socket if it exists
+    import os
+    import tempfile
+    SOCKET_PATH = os.path.join(tempfile.gettempdir(), 'lantorrent.sock')
+    if os.path.exists(SOCKET_PATH):
+        os.unlink(SOCKET_PATH)
+
+    # Schedule the loop to stop on the next iteration
+    loop = asyncio.get_running_loop()
+    loop.call_soon(loop.stop)
