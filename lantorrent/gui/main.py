@@ -141,28 +141,46 @@ class LANTorrentAppUI:
                     display_content += "  You are not sharing any files yet.\n"
                 display_content += "\n"
                 
-                # Display all discoverable files from peers (requires modification in get_status or a new method)
-                # For now, we list files known through peers in get_status if available,
-                # or you might need a separate "list available files" feature.
-                # The current get_status doesn't aggregate all files from all peers easily for a simple list.
-                # This part might need more thought on how to best display "downloadable files".
-                # A simple approach: list files from connected peers.
-                all_peer_files = {}
-                if status_data.get('peers'):
-                    for peer in self.lantorrent_instance.peer_manager.peers.values():
-                        for f_hash, f_info_tuple in peer.files.items(): # Assuming peer.files stores FileInfo tuples
-                            f_info = f_info_tuple[0] # Get FileInfo from (FileInfo, timestamp)
-                            if f_hash not in all_peer_files and f_hash not in status_data.get('shared_files', {}):
-                                all_peer_files[f_hash] = f_info
+                # Corrected logic for "Downloadable Files (from peers)"
+                all_peer_files_display_info = {}
+                if status_data.get('peers') and self.lantorrent_instance:
+                    # First, collect all files and the set of peers that have them
+                    files_and_their_peers = {} # f_hash -> {'name': name, 'size': size, 'peers': {peer_id1, peer_id2}}
+                    
+                    # Iterate through PeerInfo objects stored in peer_manager
+                    for peer_id, peer_obj in self.lantorrent_instance.peer_manager.peers.items():
+                        for f_hash, file_details_from_peer in peer_obj.files.items():
+                            # Ensure file_details_from_peer is a dictionary with 'name' and 'size'
+                            if not isinstance(file_details_from_peer, dict) or \
+                               'name' not in file_details_from_peer or \
+                               'size' not in file_details_from_peer:
+                                logger.warning(f"Peer {peer_id} has malformed file data for hash {f_hash}: {file_details_from_peer}")
+                                continue
+
+                            if f_hash not in status_data.get('shared_files', {}): # Don't list our own files as downloadable from peers
+                                if f_hash not in files_and_their_peers:
+                                    files_and_their_peers[f_hash] = {
+                                        'name': file_details_from_peer['name'],
+                                        'size': file_details_from_peer['size'],
+                                        'peers': set()
+                                    }
+                                files_and_their_peers[f_hash]['peers'].add(peer_id)
+                    
+                    # Now, populate all_peer_files_display_info with peer_count
+                    for f_hash, data in files_and_their_peers.items():
+                        all_peer_files_display_info[f_hash] = {
+                            'name': data['name'],
+                            'size': data['size'],
+                            'peer_count': len(data['peers'])
+                        }
                 
                 display_content += "Downloadable Files (from peers):\n"
-                if all_peer_files:
-                    for f_hash, f_info in all_peer_files.items():
-                         display_content += f"  - {f_info.name} ({format_size(f_info.size)}) - Peers: {f_info.peer_count}\n    Hash: {f_hash}\n"
+                if all_peer_files_display_info:
+                    for f_hash, display_info in all_peer_files_display_info.items():
+                         display_content += f"  - {display_info['name']} ({format_size(display_info['size'])}) - Peers: {display_info['peer_count']}\n    Hash: {f_hash}\n"
                 else:
                     display_content += "  No files discovered from peers yet.\n"
                 display_content += "\n"
-
 
                 display_content += "Downloading Files:\n"
                 if status_data.get('downloading'):
