@@ -210,7 +210,7 @@ class LANTorrentAppUI:
                     if hasattr(self.lantorrent_instance, 'add_file_to_share'):
                         file_info = await self.lantorrent_instance.add_file_to_share(filepath)
                         if file_info:
-                            self.root.after(0, lambda: messagebox.showinfo("Share", f"File '{Path(filepath).name}' shared. Hash: {file_info.file_hash}"))
+                            self.root.after(0, lambda: messagebox.showinfo("Share", f"File '{Path(filepath).name}' shared. Hash: {file_info.hash}"))
                             self.root.after(0, self.update_status_display)
                         else:
                             self.root.after(0, lambda: messagebox.showerror("Share", f"Failed to share file '{Path(filepath).name}'. Check logs."))
