@@ -13,6 +13,7 @@ CHUNK_TIMEOUT = 30  # seconds
 MAX_PARALLEL_CHUNKS = 5
 PEER_TIMEOUT = 120  # seconds
 TCP_BASE_PORT = 8000  # Base port for TCP connections
+BEST_PEERS_COUNT = 1
 
 class MessageType(Enum):
     """Types of messages that can be sent between peers."""

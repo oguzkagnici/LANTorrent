@@ -352,12 +352,15 @@ async def handle_share_command(app, args):
     shutil.copy2(src_path, dst_path)
 
     # Force scan of shared files
-    app.file_manager._add_shared_file(dst_path, original_name)
+    share = app.file_manager._add_shared_file(dst_path, original_name)
 
     # Success message
     message = f"File shared: {original_name}"
-    if dst_path.name != original_name:
+    if dst_path.name != original_name and share:
         message += f" (stored as {dst_path.name})"
+    elif dst_path.name != original_name and  not share:
+        os.remove(dst_path)
+        message += f" (File was not shared and has been removed, likely a duplicate)"
 
     return {
         'success': True,
