@@ -7,7 +7,7 @@ import struct
 import time
 from typing import Optional
 
-from .models import MessageType, FileInfo, ChunkRequest, CHUNK_TIMEOUT, MAX_PARALLEL_CHUNKS
+from .models import MessageType, FileInfo, ChunkRequest, CHUNK_TIMEOUT, MAX_PARALLEL_CHUNKS, BEST_PEERS_COUNT
 
 logger = logging.getLogger('lantorrent.transfer')
 
@@ -277,11 +277,9 @@ class TransferProtocol:
 
     async def download_file(self, file_hash: str, auto_share: bool = True) -> bool:
         """Download a file from the network."""
-        # Find peers that have this file
-        available_peers = []
-        for peer_id, peer in self.peer_manager.peers.items():
-            if file_hash in peer.files:
-                available_peers.append(peer_id)
+
+        # Get the best peers
+        available_peers = self.peer_manager.get_best_peers(file_hash, count=BEST_PEERS_COUNT, optimistic=True)
 
         if not available_peers:
             logger.warning(f"No peers available for file {file_hash}")
@@ -360,9 +358,10 @@ class TransferProtocol:
 
                 # If too many failures, try a different peer
                 if request.failures >= 3:
+                    additional_peers = 3
                     available_peers = [
-                        pid for pid, peer in self.peer_manager.peers.items()
-                        if request.file_hash in peer.files and pid != request.peer_id
+                        pid for pid in self.peer_manager.get_best_peers(request.file_hash, count=BEST_PEERS_COUNT + additional_peers, optimistic=True)
+                        if  pid != request.peer_id
                     ]
 
                     if available_peers:

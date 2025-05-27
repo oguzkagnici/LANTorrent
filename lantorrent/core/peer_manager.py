@@ -62,7 +62,7 @@ class PeerManager:
             logger.info(f"Removing stale peer: {pid}")
             del self.peers[pid]
 
-    def get_best_peers(self, file_hash: str, count: int = 3) -> List[str]:
+    def get_best_peers(self, file_hash: str, count: int = 1, optimistic: bool = False) -> List[str]:
         """Get the best peers for downloading a specific file based on the tit-for-tat algorithm."""
         # Find peers that have the file
         candidate_peers = [
@@ -73,11 +73,16 @@ class PeerManager:
             return []
 
         # Sort peers by upload contribution (tit-for-tat)
-        # Prioritize peers who've uploaded more to us
+        # Prioritize peers who've downloaded from us
         sorted_peers = sorted(
             candidate_peers,
             key=lambda pid: self.peers[pid].upload_bytes,
             reverse=True
         )
 
-        return sorted_peers[:count]
+        result = sorted_peers[:min(count, len(sorted_peers))]
+
+        if optimistic and len(sorted_peers) > count:
+            result.append(random.choice(sorted_peers[count:]))
+
+        return result

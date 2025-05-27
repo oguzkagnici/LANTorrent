@@ -36,14 +36,20 @@ class FileManager:
             if file_path.is_file():
                 self._add_shared_file(file_path, file_path.name)
 
+
     def _add_shared_file(self, file_path: Path, file_name: str) -> Optional[FileInfo]:
         """Add a file to the list of shared files and return its info."""
+
         try:
             file_size = file_path.stat().st_size
             num_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
 
             # Calculate the file hash using content
             file_hash = self._calculate_file_hash(file_path)
+
+            if file_hash in self.shared_files:
+                logger.warning(f"File {file_name} already shared with hash {file_hash}. Skipping.")
+                return None
 
             # Calculate chunk hashes
             chunk_hashes = []
@@ -65,16 +71,14 @@ class FileManager:
             )
 
             self.shared_files[file_hash] = (file_info, file_path)
-            # Log with both advertised name and actual stored path name if different
-            log_msg = f"Added shared file: {file_name} (hash: {file_hash})"
-            if file_name != file_path.name:
-                log_msg += f" stored as {file_path.name}"
-            logger.info(log_msg)
-            return file_info  # Return the FileInfo object
+
+            logger.info(f"Added shared file: {file_path.name} ({file_hash})")
+            return file_info
 
         except Exception as e:
-            logger.error(f"Error adding shared file {file_path} (advertised as {file_name}): {e}")
-            return None  # Return None on failure
+            logger.error(f"Error adding shared file {file_path}: {e}")
+            return None
+
 
     def _calculate_file_hash(self, file_path: Path) -> str:
         """Calculate a hash based on file content rather than path."""

@@ -76,66 +76,61 @@ class LANTorrent:
         self.tasks = []
         logger.info("LAN Torrent stopped")
 
-    async def add_file_to_share(self, file_path_str: str) -> Optional[FileInfo]:
-        """
-        Adds a file to the shared files list.
-        The file is copied to the application's share directory if it's not already there,
-        under its original name or a unique variant if a conflict exists.
-        The file is announced to peers.
-        """
-        original_file_path = Path(file_path_str).resolve()
-        if not original_file_path.exists() or not original_file_path.is_file():
-            logger.error(f"File not found or is not a file: {original_file_path}")
-            return None
+  async def add_file_to_share(self, file_path_str: str) -> Optional[FileInfo]:
+      """
+      Adds a file to the shared files list.
+      The file is copied to the application's share directory if it's not already there,
+      under its original name or a unique variant if a conflict exists.
+      The file is announced to peers.
+      """
+      original_file_path = Path(file_path_str).resolve()
+      if not original_file_path.exists() or not original_file_path.is_file():
+          logger.error(f"File not found or is not a file: {original_file_path}")
+          return None
 
-        original_file_name = original_file_path.name
-        
-        # Determine the actual path for storing the file in the share directory.
-        actual_storage_path = self.share_dir / original_file_name
-        
-        # If the original file is not already the target path in share_dir, copy it.
-        if original_file_path != actual_storage_path:
-            # Handle potential name conflicts for the copy in the share directory
-            counter = 1
-            name_base, ext = os.path.splitext(original_file_name)
-            while actual_storage_path.exists():
-                # If a file with the same name exists, create a unique name for the copy.
-                new_storage_name = f"{name_base}_{counter}{ext}"
-                actual_storage_path = self.share_dir / new_storage_name
-                counter += 1
-            
-            try:
-                shutil.copy2(original_file_path, actual_storage_path)
-                logger.info(f"Copied '{original_file_name}' from '{original_file_path}' to '{actual_storage_path}' in share directory.")
-            except Exception as e:
-                logger.error(f"Failed to copy file '{original_file_path}' to share directory '{actual_storage_path}': {e}")
-                return None
-        else:
-            # File is already in the share directory with the correct name, no copy needed.
-            logger.info(f"File '{original_file_name}' is already in the share directory at '{actual_storage_path}'.")
+      original_file_name = original_file_path.name
 
-        # Add the file to FileManager.
-        file_info = self.file_manager._add_shared_file(actual_storage_path, original_file_name)
-        
-        if file_info:
-            log_msg = f"Sharing new file: {file_info.name} (hash: {file_info.hash})"
-            if file_info.name != actual_storage_path.name:
-                log_msg += f", stored as: {actual_storage_path.name}"
-            logger.info(log_msg)
-            
-            if self.running and self.discovery:
-                self.discovery._send_announce()
-                logger.info(f"Sent announce after adding {file_info.name}")
-            return file_info
-        else:
-            logger.error(f"Failed to add file to share manager: {original_file_name} (path in share dir: {actual_storage_path})")
-            if actual_storage_path != original_file_path and actual_storage_path.exists():
-                try:
-                    os.remove(actual_storage_path)
-                    logger.info(f"Cleaned up copied file due to add failure: {actual_storage_path}")
-                except Exception as e_rm:
-                    logger.error(f"Failed to clean up copied file {actual_storage_path}: {e_rm}")
-            return None
+      # Determine the actual path for storing the file in the share directory.
+      dst_path = self.share_dir / original_file_name
+      name_base, ext = os.path.splitext(original_file_name)
+      counter = 1
+
+      # Avoid overwriting existing files
+      while dst_path.exists():
+          new_name = f"{name_base}_{counter}{ext}"
+          dst_path = self.share_dir / new_name
+          counter += 1
+
+      # If original file isn't already at the target location, copy it
+      try:
+          if original_file_path != dst_path:
+              shutil.copy2(original_file_path, dst_path)
+              logger.info(f"Copied file to share directory: {dst_path}")
+          else:
+              logger.info(f"File is already in share directory: {dst_path}")
+      except Exception as e:
+          logger.error(f"Failed to copy file: {e}")
+          return None
+
+      # Attempt to add the file to the shared list
+      file_info = self.file_manager._add_shared_file(dst_path, original_file_name)
+
+      if file_info:
+          logger.info(f"Sharing new file: {file_info.name} (hash: {file_info.hash})")
+          if self.running and self.discovery:
+              self.discovery._send_announce()
+              logger.info(f"Sent announce after adding {file_info.name}")
+          return file_info
+      else:
+          # Cleanup copied file if adding failed
+          if dst_path.exists() and dst_path != original_file_path:
+              try:
+                  os.remove(dst_path)
+                  logger.info(f"Removed copied file due to failed share: {dst_path}")
+              except Exception as cleanup_err:
+                  logger.error(f"Failed to remove copied file: {dst_path}, error: {cleanup_err}")
+          return None
+
 
     async def download_file(self, file_hash: str, auto_share: bool = True) -> bool:
         """Start downloading a file."""
@@ -442,6 +437,7 @@ async def handle_share_command(app: LANTorrent, args: dict):
             'success': False,
             'error': f"Failed to share file: {file_to_share_str}. Check server logs for details."
         }
+
 
 
 async def handle_list_command(app: LANTorrent):

@@ -43,6 +43,7 @@ class MulticastDiscovery:
         # Start to receive and announce tasks
         self.receive_task = asyncio.create_task(self._receive_loop())
         self.announce_task = asyncio.create_task(self._announce_loop())
+        self.cleanup_task = asyncio.create_task(self._cleanup_loop())
 
         #await asyncio.gather(receive_task, announce_task)
 
@@ -55,6 +56,8 @@ class MulticastDiscovery:
             self.receive_task.cancel()
         if hasattr(self, 'announce_task'):
             self.announce_task.cancel()
+        if hasattr(self, 'cleanup_task'):
+            self.cleanup_task.cancel()
 
         if self.socket:
             self.socket.close()
@@ -138,3 +141,17 @@ class MulticastDiscovery:
 
         # Update the peer information
         self.peer_manager.add_or_update_peer(peer_id, ip, port, files)
+
+    async def _cleanup_loop(self):
+        """Periodically remove stale peers."""
+        from .models import PEER_TIMEOUT
+
+        while self.running:
+            try:
+                self.peer_manager.remove_stale_peers()
+                logger.debug("Performed peer cleanup")
+            except Exception as e:
+                logger.error(f"Error in peer cleanup loop: {e}")
+
+            # Wait before next cleanup (half the PEER_TIMEOUT is a good interval)
+            await asyncio.sleep(PEER_TIMEOUT / 2)
