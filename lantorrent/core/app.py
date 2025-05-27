@@ -145,10 +145,17 @@ class LANTorrent:
                     progress = len(self.file_manager.completed_chunks.get(file_hash, set())) / file_info.chunks
                 else:
                     progress = 1.0 if file_info.size == 0 else 0.0
+                
+                # NEW: Get peer contributions
+                current_peer_contributions = {}
+                if hasattr(self.transfer, 'get_peer_contributions_for_file'):
+                    current_peer_contributions = self.transfer.get_peer_contributions_for_file(file_hash)
+
                 downloading[file_hash] = {
                     'name': file_info.name,
                     'size': file_info.size,
-                    'progress': progress
+                    'progress': progress,
+                    'peer_contributions': current_peer_contributions
                 }
 
         downloaded = {

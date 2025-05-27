@@ -21,6 +21,27 @@ except ImportError:
 logger = logging.getLogger('lantorrent.gui')
 
 
+# Define the TextHandler class for redirecting logs to the GUI
+class TextHandler(logging.Handler):
+    def __init__(self, text_widget):
+        super().__init__()
+        self.text_widget = text_widget
+        self.formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+        self.setFormatter(self.formatter)
+
+    def emit(self, record):
+        msg = self.format(record)
+
+        def append_message():
+            self.text_widget.config(state=tk.NORMAL)
+            self.text_widget.insert(tk.END, msg + "\n")
+            self.text_widget.config(state=tk.DISABLED)
+            self.text_widget.see(tk.END)  # Scroll to the end
+
+        if self.text_widget.winfo_exists():
+            self.text_widget.after(0, append_message)
+
+
 class DownloadSelectionDialog(simpledialog.Dialog):
     def __init__(self, parent, title, available_files_data):
         self.available_files_data = available_files_data
@@ -88,13 +109,14 @@ class LANTorrentAppUI:
     def __init__(self, root_tk):
         self.root = root_tk
         self.root.title("LAN Torrent")
-        self.root.geometry("800x600")
+        self.root.geometry("800x750")  # Increased height for log area
 
         self.lantorrent_instance: LANTorrent | None = None
         self.async_loop = None
         self.async_thread = None
+        self.app_logger = logging.getLogger('lantorrent')  # Initialize app_logger here
 
-        if not logging.getLogger('lantorrent').hasHandlers():
+        if not self.app_logger.hasHandlers():  # Check app_logger specifically
             logging.basicConfig(level=logging.INFO,
                                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -123,8 +145,7 @@ class LANTorrentAppUI:
 
         display_frame = ttk.LabelFrame(main_frame, text="Status & Files", padding="10")
         display_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
-        main_frame.rowconfigure(1, weight=1)
-        main_frame.columnconfigure(0, weight=1)
+        main_frame.columnconfigure(0, weight=1)  # Ensure column expands
 
         self.status_text = tk.Text(display_frame, height=15, width=80, state=tk.DISABLED, wrap=tk.WORD)
         status_scrollbar = ttk.Scrollbar(display_frame, orient=tk.VERTICAL, command=self.status_text.yview)
@@ -132,6 +153,30 @@ class LANTorrentAppUI:
 
         status_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # --- Add Log Display Area ---
+        logs_frame = ttk.LabelFrame(main_frame, text="Logs", padding="10")
+        logs_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+
+        self.log_text = tk.Text(logs_frame, height=10, width=80, state=tk.DISABLED, wrap=tk.WORD)
+        log_scrollbar = ttk.Scrollbar(logs_frame, orient=tk.VERTICAL, command=self.log_text.yview)
+        self.log_text.config(yscrollcommand=log_scrollbar.set)
+
+        log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        main_frame.rowconfigure(1, weight=1)  # Weight for Status & Files frame
+        main_frame.rowconfigure(2, weight=1)  # Weight for Logs frame, adjust as needed (e.g., weight=0 for fixed size based on height)
+
+        # --- Setup Logging to GUI ---
+        self.gui_log_handler = TextHandler(self.log_text)
+        if self.gui_log_handler not in self.app_logger.handlers:  # Add if not already present
+            self.app_logger.addHandler(self.gui_log_handler)
+
+        # Set levels after ensuring handler is present
+        if not self.app_logger.level or self.app_logger.level > logging.INFO:
+            self.app_logger.setLevel(logging.INFO)
+        self.gui_log_handler.setLevel(logging.INFO)
 
         self.status_update_job = None
 
@@ -157,6 +202,12 @@ class LANTorrentAppUI:
                 messagebox.showerror("Directory Error", f"Could not create directories: {e}")
                 return
 
+            # Ensure GUI log handler is active before starting service operations
+            if hasattr(self, 'gui_log_handler') and hasattr(self, 'app_logger'):
+                if self.gui_log_handler not in self.app_logger.handlers:
+                    self.app_logger.addHandler(self.gui_log_handler)
+                    logger.info("GUI log handler reactivated.")
+
             self.lantorrent_instance = LANTorrent(share_dir=str(share_dir), download_dir=str(download_dir))
 
             self.async_loop = asyncio.new_event_loop()
@@ -177,6 +228,12 @@ class LANTorrentAppUI:
     def stop_service(self):
         logger.info("Stop Service button pressed.")
         if self.lantorrent_instance and self.lantorrent_instance.running:
+            # Remove GUI log handler before intensive shutdown tasks
+            if hasattr(self, 'gui_log_handler') and hasattr(self, 'app_logger'):
+                if self.gui_log_handler in self.app_logger.handlers:
+                    self.app_logger.removeHandler(self.gui_log_handler)
+                    logging.getLogger('lantorrent.gui').info("GUI log handler temporarily deactivated for service stop.")
+
             self._perform_shutdown_tasks()
 
             # Reset UI elements
@@ -208,12 +265,9 @@ class LANTorrentAppUI:
             logger.info("Stopping LAN Torrent service via _perform_shutdown_tasks...")
             future = asyncio.run_coroutine_threadsafe(self.lantorrent_instance.stop(), self.async_loop)
             try:
-                # Wait for LANTorrent.stop() to complete indefinitely,
-                # mirroring the behavior of 'await app.stop()' in app.py's finally block.
-                future.result()  # Removed timeout=10
+                future.result()
                 logger.info("LANTorrent service stopped successfully.")
             except Exception as e:
-                # This will catch errors from app.stop() itself or if the future was cancelled.
                 logger.error(f"Error during LANTorrent.stop(): {e}", exc_info=True)
 
         if self.async_loop and self.async_loop.is_running():
@@ -222,7 +276,7 @@ class LANTorrentAppUI:
 
         if self.async_thread and self.async_thread.is_alive():
             logger.info("Joining asyncio thread...")
-            self.async_thread.join(timeout=5)  # Keep a timeout for thread join for safety
+            self.async_thread.join(timeout=5)
             if self.async_thread.is_alive():
                 logger.warning("Asyncio thread did not terminate cleanly.")
             else:
@@ -294,11 +348,34 @@ class LANTorrentAppUI:
                 display_content += "Downloading Files:\n"
                 if status_data.get('downloading'):
                     for fhash, fdata in status_data['downloading'].items():
-                        progress = fdata.get('progress', 0) * 100
-                        display_content += f"  - {fdata['name']} ({format_size(fdata['size'])}) - {progress:.2f}%\n    Hash: {fhash}\n"
+                        total_size = fdata.get('size', 0)
+                        progress_fraction = fdata.get('progress', 0)
+                        bytes_downloaded = int(progress_fraction * total_size)
+                        progress_percentage = progress_fraction * 100
+                        
+                        bar_length = 20  # Length of the text progress bar
+                        filled_length = int(bar_length * progress_fraction)
+                        bar = '█' * filled_length + '-' * (bar_length - filled_length)
+
+                        display_content += f"  - {fdata.get('name', 'N/A')} ({format_size(total_size)})\n"
+                        display_content += f"    Hash: {fhash}\n"
+                        display_content += f"    Progress: [{bar}] {progress_percentage:.2f}% ({format_size(bytes_downloaded)} / {format_size(total_size)})\n"
+                        
+                        # Display bytes downloaded from each peer, if data is available
+                        peer_contributions = fdata.get('peer_contributions') # You'll need to add this to get_status() in core/app.py
+                        if peer_contributions:
+                            display_content += f"    Sources:\n"
+                            if peer_contributions: # Check if the dictionary is not empty
+                                for peer_short_id, contrib_data in peer_contributions.items():
+                                    bytes_from_peer = contrib_data.get('bytes_downloaded', 0)
+                                    display_content += f"      - Peer {peer_short_id}: {format_size(bytes_from_peer)}\n"
+                            else:
+                                display_content += f"      (No specific peer source data for this file yet)\n"
+                        # Add a newline after each downloading file entry for better separation
+                        display_content += "\n" 
                 else:
                     display_content += "  No files currently downloading.\n"
-                display_content += "\n"
+                display_content += "\n" # Extra newline after the "Downloading Files" section
 
                 display_content += "Downloaded Files:\n"
                 if status_data.get('downloaded'):
@@ -372,14 +449,10 @@ class LANTorrentAppUI:
             async def _task_share():
                 try:
                     logger.info(f"Attempting to share file: {filepath} via handle_share_command")
-                    
-                    # Prepare arguments for handle_share_command
+
                     args_for_command = {'file': filepath}
-                    
-                    # Call handle_share_command, which itself calls lantorrent_instance.add_file_to_share
-                    # It requires the LANTorrent app instance and the args dict
                     result_dict = await handle_share_command(self.lantorrent_instance, args_for_command)
-                    
+
                     if result_dict.get('success'):
                         success_message = result_dict.get('output', f"File '{Path(filepath).name}' shared successfully.")
                         self.root.after(0, lambda: messagebox.showinfo("Share", success_message))
@@ -432,7 +505,14 @@ class LANTorrentAppUI:
 
     def on_closing(self):
         logger.info("Close button pressed. Shutting down...")
-        self._perform_shutdown_tasks()  # Use the refactored shutdown logic
+
+        # Remove the GUI log handler first
+        if hasattr(self, 'gui_log_handler') and hasattr(self, 'app_logger'):
+            if self.gui_log_handler in self.app_logger.handlers:
+                self.app_logger.removeHandler(self.gui_log_handler)
+                logging.getLogger('lantorrent.gui').info("GUI log handler removed for application shutdown.")
+
+        self._perform_shutdown_tasks()
 
         logger.info("Destroying Tkinter root window.")
         self.root.destroy()
