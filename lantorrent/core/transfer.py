@@ -358,8 +358,9 @@ class TransferProtocol:
 
                 # If too many failures, try a different peer
                 if request.failures >= 3:
+                    additional_peers = 3
                     available_peers = [
-                        pid for pid in self.peer_manager.get_best_peers(request.file_hash, count=BEST_PEERS_COUNT, optimistic=True)
+                        pid for pid in self.peer_manager.get_best_peers(request.file_hash, count=BEST_PEERS_COUNT + additional_peers, optimistic=True)
                         if  pid != request.peer_id
                     ]
 
