@@ -21,6 +21,7 @@ class TransferProtocol:
         self.server = None
         self.running = False
         self.active_transfers = set()
+        self._scheduler_task = None  # To store the scheduler task
 
     async def start(self):
         """Start the transfer protocol server."""
@@ -32,7 +33,8 @@ class TransferProtocol:
         self.running = True
 
         # Start background tasks
-        asyncio.create_task(self._request_scheduler())
+        if self._scheduler_task is None or self._scheduler_task.done():
+            self._scheduler_task = asyncio.create_task(self._request_scheduler())
 
         logger.info(f"Transfer protocol server started on {self.peer_manager.my_ip}:{self.peer_manager.my_port}")
 
@@ -41,7 +43,19 @@ class TransferProtocol:
 
     async def stop(self):
         """Stop the transfer protocol server."""
-        self.running = False
+        self.running = False  # Signal the scheduler to stop its loop
+
+        if self._scheduler_task and not self._scheduler_task.done():
+            self._scheduler_task.cancel()
+            try:
+                await self._scheduler_task
+            except asyncio.CancelledError:
+                logger.info("Request scheduler task cancelled.")
+            except Exception as e:
+                logger.error(f"Error during request scheduler task shutdown: {e}", exc_info=True)
+            finally:
+                self._scheduler_task = None
+
         if self.server:
             self.server.close()
             await self.server.wait_closed()

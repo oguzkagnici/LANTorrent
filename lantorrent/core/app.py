@@ -76,7 +76,7 @@ class LANTorrent:
         self.tasks = []
         logger.info("LAN Torrent stopped")
 
-  async def add_file_to_share(self, file_path_str: str) -> Optional[FileInfo]:
+    async def add_file_to_share(self, file_path_str: str) -> Optional[FileInfo]:
       """
       Adds a file to the shared files list.
       The file is copied to the application's share directory if it's not already there,

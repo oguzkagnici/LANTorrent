@@ -9,13 +9,13 @@ import os
 
 # Adjust import path for core modules
 try:
-    from lantorrent.core.app import LANTorrent
+    from lantorrent.core.app import LANTorrent, handle_share_command
     from lantorrent.core.utils import format_size
 except ImportError:
     project_root = Path(__file__).resolve().parent.parent.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    from lantorrent.core.app import LANTorrent
+    from lantorrent.core.app import LANTorrent, handle_share_command
     from lantorrent.core.utils import format_size
 
 logger = logging.getLogger('lantorrent.gui')
@@ -112,6 +112,9 @@ class LANTorrentAppUI:
         self.start_button = ttk.Button(controls_frame, text="Start Service", command=self.start_service)
         self.start_button.pack(side=tk.LEFT, padx=5)
 
+        self.stop_button = ttk.Button(controls_frame, text="Stop Service", command=self.stop_service, state=tk.DISABLED)
+        self.stop_button.pack(side=tk.LEFT, padx=5)
+
         self.share_button = ttk.Button(controls_frame, text="Share File", command=self.ui_share_file, state=tk.DISABLED)
         self.share_button.pack(side=tk.LEFT, padx=5)
 
@@ -163,12 +166,67 @@ class LANTorrentAppUI:
             asyncio.run_coroutine_threadsafe(self.lantorrent_instance.start(), self.async_loop)
 
             self.start_button.config(text="Service Running", state=tk.DISABLED)
+            self.stop_button.config(state=tk.NORMAL)  # Enable Stop button
             self.share_button.config(state=tk.NORMAL)
             self.download_button.config(state=tk.NORMAL)
             messagebox.showinfo("Service", "LAN Torrent service started.")
             self.schedule_status_update()
         else:
             messagebox.showinfo("Service", "Service is already running.")
+
+    def stop_service(self):
+        logger.info("Stop Service button pressed.")
+        if self.lantorrent_instance and self.lantorrent_instance.running:
+            self._perform_shutdown_tasks()
+
+            # Reset UI elements
+            self.start_button.config(text="Start Service", state=tk.NORMAL)
+            self.stop_button.config(state=tk.DISABLED)
+            self.share_button.config(state=tk.DISABLED)
+            self.download_button.config(state=tk.DISABLED)
+
+            # Clear the instance and related async resources to allow a clean restart
+            self.lantorrent_instance = None
+            self.async_loop = None
+            self.async_thread = None
+
+            self.status_text.config(state=tk.NORMAL)
+            self.status_text.delete(1.0, tk.END)
+            self.status_text.insert(tk.END, "Service stopped. Click 'Start Service' to begin.")
+            self.status_text.config(state=tk.DISABLED)
+            messagebox.showinfo("Service", "LAN Torrent service stopped.")
+        else:
+            messagebox.showinfo("Service", "Service is not currently running.")
+
+    def _perform_shutdown_tasks(self):
+        """Handles the actual stopping of the LANTorrent service and cleanup."""
+        if self.status_update_job:
+            self.root.after_cancel(self.status_update_job)
+            self.status_update_job = None
+
+        if self.lantorrent_instance and self.lantorrent_instance.running and self.async_loop and self.async_loop.is_running():
+            logger.info("Stopping LAN Torrent service via _perform_shutdown_tasks...")
+            future = asyncio.run_coroutine_threadsafe(self.lantorrent_instance.stop(), self.async_loop)
+            try:
+                # Wait for LANTorrent.stop() to complete indefinitely,
+                # mirroring the behavior of 'await app.stop()' in app.py's finally block.
+                future.result()  # Removed timeout=10
+                logger.info("LANTorrent service stopped successfully.")
+            except Exception as e:
+                # This will catch errors from app.stop() itself or if the future was cancelled.
+                logger.error(f"Error during LANTorrent.stop(): {e}", exc_info=True)
+
+        if self.async_loop and self.async_loop.is_running():
+            logger.info("Stopping asyncio event loop...")
+            self.async_loop.call_soon_threadsafe(self.async_loop.stop)
+
+        if self.async_thread and self.async_thread.is_alive():
+            logger.info("Joining asyncio thread...")
+            self.async_thread.join(timeout=5)  # Keep a timeout for thread join for safety
+            if self.async_thread.is_alive():
+                logger.warning("Asyncio thread did not terminate cleanly.")
+            else:
+                logger.info("Asyncio thread joined successfully.")
 
     def schedule_status_update(self):
         if self.lantorrent_instance and self.lantorrent_instance.running:
@@ -313,19 +371,25 @@ class LANTorrentAppUI:
         if filepath:
             async def _task_share():
                 try:
-                    logger.info(f"Attempting to share file: {filepath}")
-                    if hasattr(self.lantorrent_instance, 'add_file_to_share'):
-                        file_info = await self.lantorrent_instance.add_file_to_share(filepath)
-                        if file_info:
-                            self.root.after(0, lambda: messagebox.showinfo("Share", f"File '{Path(filepath).name}' shared. Hash: {file_info.hash}"))
-                            self.root.after(0, self.update_status_display)
-                        else:
-                            self.root.after(0, lambda: messagebox.showerror("Share", f"Failed to share file '{Path(filepath).name}'. Check logs."))
+                    logger.info(f"Attempting to share file: {filepath} via handle_share_command")
+                    
+                    # Prepare arguments for handle_share_command
+                    args_for_command = {'file': filepath}
+                    
+                    # Call handle_share_command, which itself calls lantorrent_instance.add_file_to_share
+                    # It requires the LANTorrent app instance and the args dict
+                    result_dict = await handle_share_command(self.lantorrent_instance, args_for_command)
+                    
+                    if result_dict.get('success'):
+                        success_message = result_dict.get('output', f"File '{Path(filepath).name}' shared successfully.")
+                        self.root.after(0, lambda: messagebox.showinfo("Share", success_message))
+                        self.root.after(0, self.update_status_display)
                     else:
-                        self.root.after(0, lambda: messagebox.showerror("Error", "Core 'add_file_to_share' method not found."))
+                        error_message = result_dict.get('error', f"Failed to share file '{Path(filepath).name}'. Check logs.")
+                        self.root.after(0, lambda: messagebox.showerror("Share", error_message))
                 except Exception as e:
-                    logger.error(f"Error during share task: {e}", exc_info=True)
-                    self.root.after(0, lambda: messagebox.showerror("Share Error", f"An error occurred: {e}"))
+                    logger.error(f"Error during share task (using handle_share_command): {e}", exc_info=True)
+                    self.root.after(0, lambda: messagebox.showerror("Share Error", f"An unexpected error occurred: {e}"))
 
             if self.async_loop.is_running():
                 asyncio.run_coroutine_threadsafe(_task_share(), self.async_loop)
@@ -368,30 +432,7 @@ class LANTorrentAppUI:
 
     def on_closing(self):
         logger.info("Close button pressed. Shutting down...")
-        if self.status_update_job:
-            self.root.after_cancel(self.status_update_job)
-            self.status_update_job = None
-
-        if self.lantorrent_instance and self.lantorrent_instance.running and self.async_loop and self.async_loop.is_running():
-            logger.info("Stopping LAN Torrent service...")
-            future = asyncio.run_coroutine_threadsafe(self.lantorrent_instance.stop(), self.async_loop)
-            try:
-                future.result(timeout=10)
-                logger.info("LANTorrent service stopped.")
-            except TimeoutError:
-                logger.warning("Timeout stopping LANTorrent service.")
-            except Exception as e:
-                logger.error(f"Error stopping LANTorrent: {e}", exc_info=True)
-
-        if self.async_loop and self.async_loop.is_running():
-            logger.info("Stopping asyncio event loop...")
-            self.async_loop.call_soon_threadsafe(self.async_loop.stop)
-
-        if self.async_thread and self.async_thread.is_alive():
-            logger.info("Joining asyncio thread...")
-            self.async_thread.join(timeout=5)
-            if self.async_thread.is_alive():
-                logger.warning("Asyncio thread did not terminate cleanly.")
+        self._perform_shutdown_tasks()  # Use the refactored shutdown logic
 
         logger.info("Destroying Tkinter root window.")
         self.root.destroy()
