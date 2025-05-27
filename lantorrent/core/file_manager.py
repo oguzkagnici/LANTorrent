@@ -36,8 +36,10 @@ class FileManager:
             if file_path.is_file():
                 self._add_shared_file(file_path, file_path.name)
 
-    def _add_shared_file(self, file_path: Path, file_name: str) -> bool:
-        """Add a file to the list of shared files."""
+
+    def _add_shared_file(self, file_path: Path, file_name: str) -> Optional[FileInfo]:
+        """Add a file to the list of shared files and return its info."""
+
         try:
             file_size = file_path.stat().st_size
             num_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
@@ -47,7 +49,7 @@ class FileManager:
 
             if file_hash in self.shared_files:
                 logger.warning(f"File {file_name} already shared with hash {file_hash}. Skipping.")
-                return False
+                return None
 
             # Calculate chunk hashes
             chunk_hashes = []
@@ -60,7 +62,7 @@ class FileManager:
                     chunk_hashes.append(chunk_hash)
 
             file_info = FileInfo(
-                name=file_name,
+                name=file_name,  # Use the provided file_name for advertisement
                 size=file_size,
                 chunks=num_chunks,
                 hash=file_hash,
@@ -69,12 +71,14 @@ class FileManager:
             )
 
             self.shared_files[file_hash] = (file_info, file_path)
+
             logger.info(f"Added shared file: {file_path.name} ({file_hash})")
-            return True
+            return file_info
 
         except Exception as e:
             logger.error(f"Error adding shared file {file_path}: {e}")
-            return False
+            return None
+
 
     def _calculate_file_hash(self, file_path: Path) -> str:
         """Calculate a hash based on file content rather than path."""
@@ -99,7 +103,6 @@ class FileManager:
                     'size': file_info.size
                 }
         return shared_files
-
 
     def start_file_download(self, file_info: FileInfo) -> None:
         """Start downloading a file."""
@@ -207,8 +210,7 @@ class FileManager:
         if file_hash not in self.shared_files:
             return None
 
-        file_info = self.shared_files[file_hash][0]
-        file_path = self.shared_files[file_hash][1]
+        file_info, file_path = self.shared_files[file_hash]  # Unpack tuple
 
         if not file_path.exists() or chunk_index >= file_info.chunks:
             return None
