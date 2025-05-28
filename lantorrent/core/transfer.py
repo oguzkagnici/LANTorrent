@@ -90,7 +90,8 @@ class TransferProtocol:
                 await self._handle_peer_stats(message)
 
         except (asyncio.IncompleteReadError, json.JSONDecodeError) as e:
-            logger.warning(f"Error handling client: {e}")
+            pass
+ #           logger.warning(f"Error handling client: {e}")
 
         finally:
             writer.close()
