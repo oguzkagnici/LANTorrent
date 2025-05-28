@@ -118,24 +118,29 @@ class LANTorrentAppUI:
     def __init__(self, root_tk):
         self.root = root_tk
         self.root.title("LAN Torrent")
-        self.root.geometry("800x750")  # Increased height for log area
+        self.root.geometry("1200x800")  # Made window wider and a bit taller
 
         self.lantorrent_instance: LANTorrent | None = None
         self.async_loop = None
         self.async_thread = None
-        self.app_logger = logging.getLogger('lantorrent')  # Initialize app_logger here
+        self.app_logger = logging.getLogger('lantorrent')
 
-        if not self.app_logger.hasHandlers():  # Check app_logger specifically
+        if not self.app_logger.hasHandlers():
             logging.basicConfig(level=logging.INFO,
                                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
         self.create_widgets()
+        self.status_update_job = None
 
     def create_widgets(self):
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
+
+        main_frame.columnconfigure(0, weight=1) 
+        main_frame.columnconfigure(1, weight=1) 
+        main_frame.rowconfigure(1, weight=1) 
 
         controls_frame = ttk.LabelFrame(main_frame, text="Controls", padding="10")
         controls_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
@@ -152,42 +157,67 @@ class LANTorrentAppUI:
         self.download_button = ttk.Button(controls_frame, text="Download File", command=self.ui_prompt_download_file, state=tk.DISABLED)
         self.download_button.pack(side=tk.LEFT, padx=5)
 
+        # Status & Files Frame (Left Side)
         display_frame = ttk.LabelFrame(main_frame, text="Status & Files", padding="10")
-        display_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
-        main_frame.columnconfigure(0, weight=1)  # Ensure column expands
+        display_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5, padx=(0, 5))
+        
+        # Configure display_frame for two rows: 
+        # Row 0 for scrollable status, Row 1 for current downloads
+        display_frame.rowconfigure(0, weight=1)    # Canvas area expands
+        display_frame.rowconfigure(1, weight=0)    # Downloads area takes needed space
+        display_frame.columnconfigure(0, weight=1) # Canvas and Downloads content expand horizontally
+        display_frame.columnconfigure(1, weight=0) # Scrollbar column
 
-        self.status_text = tk.Text(display_frame, height=15, width=80, state=tk.DISABLED, wrap=tk.WORD)
-        status_scrollbar = ttk.Scrollbar(display_frame, orient=tk.VERTICAL, command=self.status_text.yview)
-        self.status_text.config(yscrollcommand=status_scrollbar.set)
+        # Scrollable Status Area (Row 0 of display_frame)
+        self.status_canvas = tk.Canvas(display_frame, borderwidth=0)
+        self.status_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
-        status_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        status_scrollbar = ttk.Scrollbar(display_frame, orient=tk.VERTICAL, command=self.status_canvas.yview)
+        status_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.status_canvas.configure(yscrollcommand=status_scrollbar.set)
 
-        # --- Add Log Display Area ---
+        self.status_content_frame = ttk.Frame(self.status_canvas, padding="5")
+        self.status_canvas_window = self.status_canvas.create_window((0, 0), window=self.status_content_frame, anchor="nw")
+
+        def _configure_canvas_scrollregion(event):
+            self.status_canvas.configure(scrollregion=self.status_canvas.bbox("all"))
+
+        def _configure_canvas_width(event):
+            self.status_canvas.itemconfig(self.status_canvas_window, width=event.width)
+
+        self.status_content_frame.bind("<Configure>", _configure_canvas_scrollregion)
+        self.status_canvas.bind("<Configure>", _configure_canvas_width)
+
+        # Current Downloads Area (Row 1 of display_frame)
+        self.current_downloads_outer_frame = ttk.LabelFrame(display_frame, text="Current Downloads", padding="5")
+        self.current_downloads_outer_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.S), pady=(10,0))
+        
+        # This frame will hold the individual download item widgets
+        self.downloads_list_frame = ttk.Frame(self.current_downloads_outer_frame)
+        self.downloads_list_frame.pack(fill=tk.X, expand=True)
+
+
+        # Logs Frame (Right Side)
         logs_frame = ttk.LabelFrame(main_frame, text="Logs", padding="10")
-        logs_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        logs_frame.grid(row=1, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5, padx=(5, 0))
+        
+        logs_frame.rowconfigure(0, weight=1)
+        logs_frame.columnconfigure(0, weight=1)
 
-        self.log_text = tk.Text(logs_frame, height=10, width=80, state=tk.DISABLED, wrap=tk.WORD)
+        self.log_text = tk.Text(logs_frame, height=10, width=50, state=tk.DISABLED, wrap=tk.WORD) # Adjusted width
         log_scrollbar = ttk.Scrollbar(logs_frame, orient=tk.VERTICAL, command=self.log_text.yview)
         self.log_text.config(yscrollcommand=log_scrollbar.set)
 
-        log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        main_frame.rowconfigure(1, weight=1)  # Weight for Status & Files frame
-        main_frame.rowconfigure(2, weight=1)  # Weight for Logs frame, adjust as needed (e.g., weight=0 for fixed size based on height)
-
-        # --- Setup Logging to GUI ---
+        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        log_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        
         self.gui_log_handler = TextHandler(self.log_text)
-        if self.gui_log_handler not in self.app_logger.handlers:  # Add if not already present
+        if self.gui_log_handler not in self.app_logger.handlers:
             self.app_logger.addHandler(self.gui_log_handler)
 
-        # Set levels after ensuring handler is present
         if not self.app_logger.level or self.app_logger.level > logging.INFO:
             self.app_logger.setLevel(logging.INFO)
         self.gui_log_handler.setLevel(logging.INFO)
-
-        self.status_update_job = None
 
     def _run_async_loop(self, loop_to_run):
         asyncio.set_event_loop(loop_to_run)
@@ -211,7 +241,6 @@ class LANTorrentAppUI:
                 messagebox.showerror("Directory Error", f"Could not create directories: {e}")
                 return
 
-            # Ensure GUI log handler is active before starting service operations
             if hasattr(self, 'gui_log_handler') and hasattr(self, 'app_logger'):
                 if self.gui_log_handler not in self.app_logger.handlers:
                     self.app_logger.addHandler(self.gui_log_handler)
@@ -226,7 +255,7 @@ class LANTorrentAppUI:
             asyncio.run_coroutine_threadsafe(self.lantorrent_instance.start(), self.async_loop)
 
             self.start_button.config(text="Service Running", state=tk.DISABLED)
-            self.stop_button.config(state=tk.NORMAL)  # Enable Stop button
+            self.stop_button.config(state=tk.NORMAL)
             self.share_button.config(state=tk.NORMAL)
             self.download_button.config(state=tk.NORMAL)
             messagebox.showinfo("Service", "LAN Torrent service started.")
@@ -237,7 +266,6 @@ class LANTorrentAppUI:
     def stop_service(self):
         logger.info("Stop Service button pressed.")
         if self.lantorrent_instance and self.lantorrent_instance.running:
-            # Remove GUI log handler before intensive shutdown tasks
             if hasattr(self, 'gui_log_handler') and hasattr(self, 'app_logger'):
                 if self.gui_log_handler in self.app_logger.handlers:
                     self.app_logger.removeHandler(self.gui_log_handler)
@@ -245,27 +273,21 @@ class LANTorrentAppUI:
 
             self._perform_shutdown_tasks()
 
-            # Reset UI elements
             self.start_button.config(text="Start Service", state=tk.NORMAL)
             self.stop_button.config(state=tk.DISABLED)
             self.share_button.config(state=tk.DISABLED)
             self.download_button.config(state=tk.DISABLED)
 
-            # Clear the instance and related async resources to allow a clean restart
             self.lantorrent_instance = None
             self.async_loop = None
             self.async_thread = None
 
-            self.status_text.config(state=tk.NORMAL)
-            self.status_text.delete(1.0, tk.END)
-            self.status_text.insert(tk.END, "Service stopped. Click 'Start Service' to begin.")
-            self.status_text.config(state=tk.DISABLED)
+            self.update_status_display() 
             messagebox.showinfo("Service", "LAN Torrent service stopped.")
         else:
             messagebox.showinfo("Service", "Service is not currently running.")
 
     def _perform_shutdown_tasks(self):
-        """Handles the actual stopping of the LANTorrent service and cleanup."""
         if self.status_update_job:
             self.root.after_cancel(self.status_update_job)
             self.status_update_job = None
@@ -294,107 +316,213 @@ class LANTorrentAppUI:
     def schedule_status_update(self):
         if self.lantorrent_instance and self.lantorrent_instance.running:
             self.update_status_display()
-            self.status_update_job = self.root.after(5000, self.schedule_status_update)
+            # Changed update interval from 5000ms to 1000ms
+            self.status_update_job = self.root.after(1000, self.schedule_status_update)
+        elif not self.lantorrent_instance and self.status_update_job:
+            self.root.after_cancel(self.status_update_job)
+            self.status_update_job = None
+            self.update_status_display()
 
     def update_status_display(self):
-        if self.lantorrent_instance and self.lantorrent_instance.running:
-            try:
-                status_data = self.lantorrent_instance.get_status()
-                display_content = f"My ID: {status_data.get('id', 'N/A')}\n"
-                display_content += f"Address: {status_data.get('address', 'N/A')}\n\n"
+        # Update scrollable status content
+        for widget in self.status_content_frame.winfo_children():
+            widget.destroy()
 
-                display_content += "Peers:\n"
-                if status_data.get('peers'):
-                    for pid, pdata in status_data['peers'].items():
-                        upload_str = format_size(pdata.get('upload', 0))
-                        download_str = format_size(pdata.get('download', 0))
-                        display_content += f"  - ID: {pid[:8]}... ({pdata['ip']}:{pdata['port']}), "
-                        display_content += f"Files: {pdata.get('files', 0)}, "
-                        display_content += f"Up: {upload_str}, Down: {download_str}\n"
-                else:
-                    display_content += "  No peers connected.\n"
-                display_content += "\n"
+        if not self.lantorrent_instance or not self.lantorrent_instance.running:
+            msg_label = ttk.Label(self.status_content_frame, text="Service not running. Click 'Start Service' to begin.", font=("Arial", 10))
+            msg_label.pack(pady=20, padx=10, anchor="center")
+            # Ensure the label is sized, which might trigger <Configure> on status_content_frame
+            self.status_content_frame.update_idletasks() 
+            # If service isn't running, also clear current downloads display
+            self._update_current_downloads_display({}) 
+            # The <Configure> event on self.status_content_frame will handle scrollregion if size changed.
+            # If the "Service not running" message itself causes a size change, 
+            # an explicit scrollregion update might still be needed here if <Configure> doesn't fire reliably
+            # For now, let's assume <Configure> handles it. If not, uncomment the line below.
+            # self.status_canvas.config(scrollregion=self.status_canvas.bbox("all"))
+            return
 
-                display_content += "Shared Files (from this instance):\n"
-                if status_data.get('shared_files'):
-                    for fhash, fdata in status_data['shared_files'].items():
-                        display_content += f"  - {fdata['name']} ({format_size(fdata['size'])})\n    Hash: {fhash}\n"
-                else:
-                    display_content += "  You are not sharing any files yet.\n"
-                display_content += "\n"
+        try:
+            status_data = self.lantorrent_instance.get_status()
 
-                # Use the centralized method to get downloadable files
-                downloadable_files_list = self._get_downloadable_files_list()
+            general_frame = ttk.LabelFrame(self.status_content_frame, text="My Info", padding="5")
+            general_frame.pack(fill=tk.X, expand=True, pady=(0,5), padx=5)
+            ttk.Label(general_frame, text=f"My ID: {status_data.get('id', 'N/A')}").pack(anchor="w", padx=5, pady=2)
+            ttk.Label(general_frame, text=f"Address: {status_data.get('address', 'N/A')}").pack(anchor="w", padx=5, pady=2)
 
-                display_content += "Downloadable Files (from peers):\n"
-                if downloadable_files_list:
-                    for file_info in downloadable_files_list:
-                        display_content += f"  - {file_info['name']} ({file_info['formatted_size']}) - Peers: {file_info['peer_count']}\n    Hash: {file_info['hash']}\n"
-                else:
-                    display_content += "  No files discovered from peers yet (or all are already shared/downloaded by you).\n"
-                display_content += "\n"
+            self._display_peers_info(status_data.get('peers', {}))
+            self._display_shared_files_info(status_data.get('shared_files', {}))
+            downloadable_files_list = self._get_downloadable_files_list()
+            self._display_downloadable_files_info(downloadable_files_list)
+            self._display_downloaded_files_info(status_data.get('downloaded', {}))
 
-                display_content += "Downloading Files:\n"
-                if status_data.get('downloading'):
-                    for fhash, fdata in status_data['downloading'].items():
-                        total_size = fdata.get('size', 0)
-                        progress_fraction = fdata.get('progress', 0)
-                        bytes_downloaded = int(progress_fraction * total_size)
-                        progress_percentage = progress_fraction * 100
-                        
-                        bar_length = 20  # Length of the text progress bar
-                        filled_length = int(bar_length * progress_fraction)
-                        bar = '█' * filled_length + '-' * (bar_length - filled_length)
+            # Update the separate current downloads display
+            self._update_current_downloads_display(status_data.get('downloading', {}))
 
-                        display_content += f"  - {fdata.get('name', 'N/A')} ({format_size(total_size)})\n"
-                        display_content += f"    Hash: {fhash}\n"
-                        display_content += f"    Progress: [{bar}] {progress_percentage:.2f}% ({format_size(bytes_downloaded)} / {format_size(total_size)})\n"
-                        
-                        display_content += "\n" # Add a newline after each downloading file entry
-                else:
-                    display_content += "  No files currently downloading.\n"
-                display_content += "\n" # Extra newline after the "Downloading Files" section
+        except Exception as e:
+            logger.error(f"Error updating status display: {e}", exc_info=True)
+            ttk.Label(self.status_content_frame, text=f"Error updating status: {e}").pack(pady=10, padx=10, anchor="w")
+            # Clear current downloads on error too
+            self._update_current_downloads_display({})
+        
+        # Allow Tkinter to process all geometry changes within status_content_frame.
+        # This should trigger the <Configure> event on self.status_content_frame if its size
+        # has changed, which in turn calls _configure_canvas_scrollregion.
+        self.status_content_frame.update_idletasks()
 
-                display_content += "Downloaded Files:\n"
-                if status_data.get('downloaded'):
-                    for fhash, fdata in status_data['downloaded'].items():
-                        display_content += f"  - {fdata['name']} ({format_size(fdata['size'])}) - At: {fdata['downloaded_at']}\n    Hash: {fhash}\n"
-                        
-                        peer_contributions = fdata.get('peer_contributions')
-                        if peer_contributions:
-                            display_content += f"    Sources:\n"
-                            if peer_contributions: # Check if the dictionary is not empty
-                                for peer_short_id, contrib_data in peer_contributions.items():
-                                    bytes_from_peer = contrib_data.get('bytes_downloaded', 0)
-                                    display_content += f"      - Peer {peer_short_id}: {format_size(bytes_from_peer)}\n"
-                            else:
-                                display_content += f"      (No specific peer source data recorded for this file)\n"
-                        display_content += "\n" # Add a newline after each downloaded file entry
-                else:
-                    display_content += "  No files downloaded yet.\n"
+    def _update_current_downloads_display(self, downloading_data):
+        # Clear previous download items from the dedicated frame
+        for widget in self.downloads_list_frame.winfo_children():
+            widget.destroy()
 
-                self.status_text.config(state=tk.NORMAL)
-                self.status_text.delete(1.0, tk.END)
-                self.status_text.insert(tk.END, display_content)
-                self.status_text.config(state=tk.DISABLED)
-            except Exception as e:
-                logger.error(f"Error updating status display: {e}", exc_info=True)
-                self.status_text.config(state=tk.NORMAL)
-                self.status_text.delete(1.0, tk.END)
-                self.status_text.insert(tk.END, f"Error updating status: {e}")
-                self.status_text.config(state=tk.DISABLED)
+        if not downloading_data:
+            ttk.Label(self.downloads_list_frame, text="No active downloads.").pack(pady=5, padx=5, anchor="w")
+            return
+
+        for f_hash, fdata in downloading_data.items():
+            item_frame = ttk.Frame(self.downloads_list_frame, padding=(0, 3)) # Padding between download items
+            item_frame.pack(fill=tk.X, expand=True, pady=(0,2)) # Small vertical space between items
+
+            name = fdata.get('name', 'N/A')
+            size = fdata.get('size', 0)
+            progress_fraction = fdata.get('progress', 0)  # This is 0.0 to 1.0
+            progress_percentage = progress_fraction * 100
+
+            info_text = f"{name} ({format_size(size)})"
+            
+            # Frame to hold label and progress bar side-by-side
+            content_item_frame = ttk.Frame(item_frame)
+            content_item_frame.pack(fill=tk.X, expand=True)
+
+            label = ttk.Label(content_item_frame, text=info_text, anchor="w")
+            label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,10)) # Give label space to expand
+
+            pb = ttk.Progressbar(content_item_frame, orient=tk.HORIZONTAL, length=150, mode='determinate', value=progress_percentage)
+            pb.pack(side=tk.LEFT, padx=(0,5)) # Progress bar takes fixed length
+
+            percent_label = ttk.Label(content_item_frame, text=f"{progress_percentage:.1f}%", width=6, anchor="e")
+            percent_label.pack(side=tk.LEFT, padx=(5,0))
+
+    def _create_treeview_frame(self, parent_frame, title_text, columns_config, data_list, empty_message_values):
+        frame = ttk.LabelFrame(parent_frame, text=title_text, padding="5")
+        frame.pack(fill=tk.X, expand=True, pady=5, padx=5)
+
+        tree_container = ttk.Frame(frame)
+        tree_container.pack(fill=tk.BOTH, expand=True)
+
+        tree = ttk.Treeview(tree_container, columns=list(columns_config.keys()), show="headings")
+        
+        col_ids = list(columns_config.keys())
+        for col_id in col_ids:
+            heading_text, width, anchor, stretch = columns_config[col_id]
+            tree.heading(col_id, text=heading_text, anchor=tk.W)
+            tree.column(col_id, width=width, anchor=anchor, minwidth=max(40, width//2), stretch=stretch)
+        
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar_x = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=tree.xview)
+        tree.configure(xscrollcommand=scrollbar_x.set)
+        scrollbar_x.pack(fill=tk.X, pady=(2,0))
+
+        if data_list:
+            for item_values in data_list:
+                tree.insert("", tk.END, values=item_values)
         else:
-            self.status_text.config(state=tk.NORMAL)
-            self.status_text.delete(1.0, tk.END)
-            self.status_text.insert(tk.END, "Service not running. Click 'Start Service'.")
-            self.status_text.config(state=tk.DISABLED)
+            tree.insert("", tk.END, values=empty_message_values, tags=('empty_row',))
+            tree.tag_configure('empty_row', foreground='grey')
+        return tree
+
+    def _display_peers_info(self, peers_data):
+        columns = {
+            "id": ("ID", 70, tk.W, False),
+            "address": ("Address", 130, tk.W, False),
+            "files": ("Files", 40, tk.CENTER, False),
+            "up": ("Up", 70, tk.E, False),
+            "down": ("Down", 70, tk.E, False)
+        }
+        data = []
+        if peers_data:
+            for pid, pdata in peers_data.items():
+                data.append((
+                    pid[:8] + "...",
+                    f"{pdata['ip']}:{pdata['port']}",
+                    pdata.get('files', 0),
+                    format_size(pdata.get('upload', 0)),
+                    format_size(pdata.get('download', 0))
+                ))
+        self._create_treeview_frame(self.status_content_frame, "Peers", columns, data, 
+                                    ("No peers connected.", "", "", "", ""))
+
+    def _display_shared_files_info(self, shared_files_data):
+        columns = {
+            "name": ("Name", 200, tk.W, True),
+            "size": ("Size", 80, tk.E, False),
+            "hash": ("Hash", 250, tk.W, True)
+        }
+        data = []
+        if shared_files_data:
+            for fhash, fdata in shared_files_data.items():
+                data.append((
+                    fdata['name'],
+                    format_size(fdata['size']),
+                    fhash
+                ))
+        self._create_treeview_frame(self.status_content_frame, "My Shared Files", columns, data,
+                                    ("Not sharing any files yet.", "", ""))
+
+    def _display_downloadable_files_info(self, downloadable_files_list):
+        columns = {
+            "name": ("Name", 200, tk.W, True),
+            "size": ("Size", 80, tk.E, False),
+            "peers": ("Peers", 50, tk.CENTER, False),
+            "hash": ("Hash", 250, tk.W, True)
+        }
+        data = []
+        if downloadable_files_list:
+            for file_info in downloadable_files_list:
+                data.append((
+                    file_info['name'],
+                    file_info['formatted_size'],
+                    file_info['peer_count'],
+                    file_info['hash']
+                ))
+        self._create_treeview_frame(self.status_content_frame, "Downloadable Files (from peers)", columns, data,
+                                    ("No files discovered from peers yet.", "", "", ""))
+
+    def _display_downloaded_files_info(self, downloaded_files_data):
+        columns = {
+            "name": ("Name", 180, tk.W, True),
+            "size": ("Size", 80, tk.E, False),
+            "completed_at": ("Completed At", 130, tk.W, False),
+            "sources": ("Sources", 120, tk.W, True),
+            "hash": ("Hash", 150, tk.W, True)
+        }
+        data = []
+        if downloaded_files_data:
+            for fhash, fdata in downloaded_files_data.items():
+                peer_contributions = fdata.get('peer_contributions')
+                sources_str = "N/A"
+                if peer_contributions:
+                    sources_list = [f"{psid[:6]}..: {format_size(cdata.get('bytes_downloaded',0))}" 
+                                    for psid, cdata in peer_contributions.items()]
+                    if sources_list:
+                        sources_str = ", ".join(sources_list)
+                data.append((
+                    fdata['name'],
+                    format_size(fdata['size']),
+                    fdata['downloaded_at'],
+                    sources_str,
+                    fhash
+                ))
+        self._create_treeview_frame(self.status_content_frame, "Completed Downloads", columns, data,
+                                    ("No files downloaded yet.", "", "", "", ""))
 
     def _get_downloadable_files_list(self):
         downloadable_files = []
         if self.lantorrent_instance and self.lantorrent_instance.peer_manager:
             status_data = self.lantorrent_instance.get_status()
             my_shared_hashes = set(status_data.get('shared_files', {}).keys())
-            my_downloaded_hashes = set(status_data.get('downloaded', {}).keys()) # Add this line
+            my_downloaded_hashes = set(status_data.get('downloaded', {}).keys())
 
             files_and_their_peers = {}
             for peer_id, peer_obj in self.lantorrent_instance.peer_manager.peers.items():
@@ -407,7 +535,7 @@ class LANTorrentAppUI:
                         logger.warning(f"Peer {peer_id} has malformed file data for hash {f_hash}: {file_details_from_peer}")
                         continue
 
-                    if f_hash not in my_shared_hashes and f_hash not in my_downloaded_hashes: # Modify this condition
+                    if f_hash not in my_shared_hashes and f_hash not in my_downloaded_hashes:
                         if f_hash not in files_and_their_peers:
                             files_and_their_peers[f_hash] = {
                                 'name': file_details_from_peer['name'],
@@ -468,7 +596,6 @@ class LANTorrentAppUI:
 
         dialog = DownloadSelectionDialog(self.root, "Download File", available_files_list)
         file_hash_to_download = dialog.result_hash
-        # Get the value from the checkbox
         auto_share_after_download = dialog.auto_share_var.get()
 
         if file_hash_to_download:
@@ -498,7 +625,6 @@ class LANTorrentAppUI:
     def on_closing(self):
         logger.info("Close button pressed. Shutting down...")
 
-        # Remove the GUI log handler first
         if hasattr(self, 'gui_log_handler') and hasattr(self, 'app_logger'):
             if self.gui_log_handler in self.app_logger.handlers:
                 self.app_logger.removeHandler(self.gui_log_handler)
