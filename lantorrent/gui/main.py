@@ -47,6 +47,7 @@ class DownloadSelectionDialog(simpledialog.Dialog):
         self.available_files_data = available_files_data
         self.result_hash = None
         self._file_display_map = {}
+        self.auto_share_var = tk.BooleanVar(value=True)  # Added for checkbox
         super().__init__(parent, title)
 
     def body(self, master):
@@ -71,6 +72,12 @@ class DownloadSelectionDialog(simpledialog.Dialog):
         if display_options and self.available_files_data:
             self.combobox.current(0)
         self.combobox.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5, padx=5)
+        
+        # --- Add Checkbox for auto-share ---
+        self.auto_share_checkbox = ttk.Checkbutton(dialog_frame, text="Automatically share after download", variable=self.auto_share_var)
+        self.auto_share_checkbox.grid(row=2, column=0, sticky=tk.W, pady=(5,0), padx=5)
+        # --- End Checkbox ---
+        
         dialog_frame.columnconfigure(0, weight=1)
 
         return self.combobox
@@ -103,6 +110,8 @@ class DownloadSelectionDialog(simpledialog.Dialog):
             self.result_hash = self._file_display_map[selected_display_string]
         else:
             self.result_hash = None
+        # self.result will now be a tuple (hash, auto_share_boolean)
+        # No, we will access self.auto_share_var.get() directly in the calling method.
 
 
 class LANTorrentAppUI:
@@ -314,39 +323,15 @@ class LANTorrentAppUI:
                     display_content += "  You are not sharing any files yet.\n"
                 display_content += "\n"
 
-                all_peer_files_display_info = {}
-                if status_data.get('peers') and self.lantorrent_instance:
-                    files_and_their_peers = {}
-                    for peer_id, peer_obj in self.lantorrent_instance.peer_manager.peers.items():
-                        for f_hash, file_details_from_peer in peer_obj.files.items():
-                            if not isinstance(file_details_from_peer, dict) or \
-                               'name' not in file_details_from_peer or \
-                               'size' not in file_details_from_peer:
-                                logger.warning(f"Peer {peer_id} has malformed file data for hash {f_hash}: {file_details_from_peer}")
-                                continue
-
-                            if f_hash not in status_data.get('shared_files', {}):
-                                if f_hash not in files_and_their_peers:
-                                    files_and_their_peers[f_hash] = {
-                                        'name': file_details_from_peer['name'],
-                                        'size': file_details_from_peer['size'],
-                                        'peers': set()
-                                    }
-                                files_and_their_peers[f_hash]['peers'].add(peer_id)
-
-                    for f_hash, data in files_and_their_peers.items():
-                        all_peer_files_display_info[f_hash] = {
-                            'name': data['name'],
-                            'size': data['size'],
-                            'peer_count': len(data['peers'])
-                        }
+                # Use the centralized method to get downloadable files
+                downloadable_files_list = self._get_downloadable_files_list()
 
                 display_content += "Downloadable Files (from peers):\n"
-                if all_peer_files_display_info:
-                    for f_hash, display_info in all_peer_files_display_info.items():
-                        display_content += f"  - {display_info['name']} ({format_size(display_info['size'])}) - Peers: {display_info['peer_count']}\n    Hash: {f_hash}\n"
+                if downloadable_files_list:
+                    for file_info in downloadable_files_list:
+                        display_content += f"  - {file_info['name']} ({file_info['formatted_size']}) - Peers: {file_info['peer_count']}\n    Hash: {file_info['hash']}\n"
                 else:
-                    display_content += "  No files discovered from peers yet.\n"
+                    display_content += "  No files discovered from peers yet (or all are already shared/downloaded by you).\n"
                 display_content += "\n"
 
                 display_content += "Downloading Files:\n"
@@ -409,6 +394,7 @@ class LANTorrentAppUI:
         if self.lantorrent_instance and self.lantorrent_instance.peer_manager:
             status_data = self.lantorrent_instance.get_status()
             my_shared_hashes = set(status_data.get('shared_files', {}).keys())
+            my_downloaded_hashes = set(status_data.get('downloaded', {}).keys()) # Add this line
 
             files_and_their_peers = {}
             for peer_id, peer_obj in self.lantorrent_instance.peer_manager.peers.items():
@@ -421,7 +407,7 @@ class LANTorrentAppUI:
                         logger.warning(f"Peer {peer_id} has malformed file data for hash {f_hash}: {file_details_from_peer}")
                         continue
 
-                    if f_hash not in my_shared_hashes:
+                    if f_hash not in my_shared_hashes and f_hash not in my_downloaded_hashes: # Modify this condition
                         if f_hash not in files_and_their_peers:
                             files_and_their_peers[f_hash] = {
                                 'name': file_details_from_peer['name'],
@@ -482,12 +468,14 @@ class LANTorrentAppUI:
 
         dialog = DownloadSelectionDialog(self.root, "Download File", available_files_list)
         file_hash_to_download = dialog.result_hash
+        # Get the value from the checkbox
+        auto_share_after_download = dialog.auto_share_var.get()
 
         if file_hash_to_download:
             async def _task_download():
                 try:
-                    logger.info(f"Attempting to download file with hash: {file_hash_to_download}")
-                    success = await self.lantorrent_instance.download_file(file_hash_to_download)
+                    logger.info(f"Attempting to download file with hash: {file_hash_to_download}, auto_share: {auto_share_after_download}")
+                    success = await self.lantorrent_instance.download_file(file_hash_to_download, auto_share=auto_share_after_download)
                     if success:
                         self.root.after(0, lambda: messagebox.showinfo("Download", f"Download started for hash: {file_hash_to_download}"))
                         self.root.after(0, self.update_status_display)
