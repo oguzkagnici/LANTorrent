@@ -297,7 +297,11 @@ class LANTorrentAppUI:
                 display_content += "Peers:\n"
                 if status_data.get('peers'):
                     for pid, pdata in status_data['peers'].items():
-                        display_content += f"  - ID: {pid[:8]}... ({pdata['ip']}:{pdata['port']}), Files: {pdata['files']}\n"
+                        upload_str = format_size(pdata.get('upload', 0))
+                        download_str = format_size(pdata.get('download', 0))
+                        display_content += f"  - ID: {pid[:8]}... ({pdata['ip']}:{pdata['port']}), "
+                        display_content += f"Files: {pdata.get('files', 0)}, "
+                        display_content += f"Up: {upload_str}, Down: {download_str}\n"
                 else:
                     display_content += "  No peers connected.\n"
                 display_content += "\n"
@@ -361,18 +365,7 @@ class LANTorrentAppUI:
                         display_content += f"    Hash: {fhash}\n"
                         display_content += f"    Progress: [{bar}] {progress_percentage:.2f}% ({format_size(bytes_downloaded)} / {format_size(total_size)})\n"
                         
-                        # Display bytes downloaded from each peer, if data is available
-                        peer_contributions = fdata.get('peer_contributions') # You'll need to add this to get_status() in core/app.py
-                        if peer_contributions:
-                            display_content += f"    Sources:\n"
-                            if peer_contributions: # Check if the dictionary is not empty
-                                for peer_short_id, contrib_data in peer_contributions.items():
-                                    bytes_from_peer = contrib_data.get('bytes_downloaded', 0)
-                                    display_content += f"      - Peer {peer_short_id}: {format_size(bytes_from_peer)}\n"
-                            else:
-                                display_content += f"      (No specific peer source data for this file yet)\n"
-                        # Add a newline after each downloading file entry for better separation
-                        display_content += "\n" 
+                        display_content += "\n" # Add a newline after each downloading file entry
                 else:
                     display_content += "  No files currently downloading.\n"
                 display_content += "\n" # Extra newline after the "Downloading Files" section
@@ -381,6 +374,17 @@ class LANTorrentAppUI:
                 if status_data.get('downloaded'):
                     for fhash, fdata in status_data['downloaded'].items():
                         display_content += f"  - {fdata['name']} ({format_size(fdata['size'])}) - At: {fdata['downloaded_at']}\n    Hash: {fhash}\n"
+                        
+                        peer_contributions = fdata.get('peer_contributions')
+                        if peer_contributions:
+                            display_content += f"    Sources:\n"
+                            if peer_contributions: # Check if the dictionary is not empty
+                                for peer_short_id, contrib_data in peer_contributions.items():
+                                    bytes_from_peer = contrib_data.get('bytes_downloaded', 0)
+                                    display_content += f"      - Peer {peer_short_id}: {format_size(bytes_from_peer)}\n"
+                            else:
+                                display_content += f"      (No specific peer source data recorded for this file)\n"
+                        display_content += "\n" # Add a newline after each downloaded file entry
                 else:
                     display_content += "  No files downloaded yet.\n"
 

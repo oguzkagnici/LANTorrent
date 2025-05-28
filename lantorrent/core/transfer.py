@@ -22,6 +22,9 @@ class TransferProtocol:
         self.running = False
         self.active_transfers = set()
         self._scheduler_task = None  # To store the scheduler task
+        # NEW: Dictionary to track bytes downloaded from each peer for each file
+        # Structure: {file_hash: {peer_id: bytes_count}}
+        self.bytes_downloaded_from_peers_for_file = {}
 
     async def start(self):
         """Start the transfer protocol server."""
@@ -55,6 +58,10 @@ class TransferProtocol:
                 logger.error(f"Error during request scheduler task shutdown: {e}", exc_info=True)
             finally:
                 self._scheduler_task = None
+
+        # Clear peer contribution data on stop
+        self.bytes_downloaded_from_peers_for_file.clear()
+        logger.info("Cleared peer contribution data.")
 
         if self.server:
             self.server.close()
@@ -246,19 +253,29 @@ class TransferProtocol:
                 # Read the chunk data
                 chunk_data = await reader.readexactly(chunk_length)
 
-                # Close the connection
+                # Close the connection first, as per original logic
                 writer.close()
                 await writer.wait_closed()
 
-                # Update peer stats
+                # Update peer stats (general)
                 self.peer_manager.peers[peer_id].download_bytes += len(chunk_data)
-
-                # Send peer stats
+                # Send peer stats (general)
                 await self._send_peer_stats(peer)
 
                 # Save the chunk
-                return self.file_manager.save_chunk(file_hash, chunk_index, chunk_data)
-            else:
+                saved_successfully = self.file_manager.save_chunk(file_hash, chunk_index, chunk_data)
+
+                if saved_successfully:
+                    # --- NEW: Track peer contribution ---
+                    if file_hash not in self.bytes_downloaded_from_peers_for_file:
+                        self.bytes_downloaded_from_peers_for_file[file_hash] = {}
+                    if peer_id not in self.bytes_downloaded_from_peers_for_file[file_hash]:
+                        self.bytes_downloaded_from_peers_for_file[file_hash][peer_id] = 0
+                    self.bytes_downloaded_from_peers_for_file[file_hash][peer_id] += len(chunk_data)
+                    logger.debug(f"Tracked {len(chunk_data)} bytes from peer {peer_id[:8]} for file {file_hash[:8]}")
+                    # --- END NEW ---
+                return saved_successfully
+            else:  # header_response success was False
                 writer.close()
                 await writer.wait_closed()
                 return False
@@ -355,9 +372,12 @@ class TransferProtocol:
         tasks = []
 
         for request in list(self.active_transfers):
-            # Remove completed requests
+            # Remove requests for files no longer being actively downloaded by file_manager
             if request.file_hash not in self.file_manager.downloading_files:
                 self.active_transfers.remove(request)
+                # NOTE: We are NOT deleting from self.bytes_downloaded_from_peers_for_file here.
+                # This data will persist for completed downloads and be retrieved by get_status.
+                # It will be cleared when TransferProtocol stops.
                 continue
 
             # Skip requests for chunks we already have
@@ -375,7 +395,7 @@ class TransferProtocol:
                     additional_peers = 3
                     available_peers = [
                         pid for pid in self.peer_manager.get_best_peers(request.file_hash, count=BEST_PEERS_COUNT + additional_peers, optimistic=True)
-                        if  pid != request.peer_id
+                        if pid != request.peer_id
                     ]
 
                     if available_peers:
@@ -414,3 +434,16 @@ class TransferProtocol:
             # Mark as failed but keep in queue for retry
             request.in_progress = False
             request.failures += 1
+
+    def get_peer_contributions_for_file(self, file_hash: str) -> dict:
+        """
+        Returns a dictionary of peer contributions for a given file hash.
+        Format: {'peer_id_short': {'bytes_downloaded': count}, ...}
+        """
+        contributions = {}
+        if file_hash in self.bytes_downloaded_from_peers_for_file:
+            for peer_id, byte_count in self.bytes_downloaded_from_peers_for_file[file_hash].items():
+                # Use the first 8 characters of peer_id as short ID
+                peer_short_id = peer_id[:8]
+                contributions[peer_short_id] = {'bytes_downloaded': byte_count}
+        return contributions

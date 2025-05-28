@@ -146,27 +146,32 @@ class LANTorrent:
                 else:
                     progress = 1.0 if file_info.size == 0 else 0.0
                 
-                # NEW: Get peer contributions
-                current_peer_contributions = {}
-                if hasattr(self.transfer, 'get_peer_contributions_for_file'):
-                    current_peer_contributions = self.transfer.get_peer_contributions_for_file(file_hash)
-
+                # Peer contributions are no longer added to 'downloading'
                 downloading[file_hash] = {
                     'name': file_info.name,
                     'size': file_info.size,
-                    'progress': progress,
-                    'peer_contributions': current_peer_contributions
+                    'progress': progress
+                    # No 'peer_contributions' field here anymore
                 }
 
-        downloaded = {
-            file_hash: {
-                'name': file_info.name,
-                'size': file_info.size,
-                'downloaded_at': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(downloaded_at))
+        downloaded = {}
+        # Ensure self.file_manager.downloaded_files exists and is iterable
+        if hasattr(self.file_manager, 'downloaded_files') and self.file_manager.downloaded_files:
+            for file_hash, (file_info, downloaded_at) in self.file_manager.downloaded_files.items():
+                # Get peer contributions for downloaded files
+                current_peer_contributions = {}
+                if hasattr(self.transfer, 'get_peer_contributions_for_file'):
+                    current_peer_contributions = self.transfer.get_peer_contributions_for_file(file_hash)
+                
+                downloaded[file_hash] = {
+                    'name': file_info.name,
+                    'size': file_info.size,
+                    'downloaded_at': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(downloaded_at)),
+                    'peer_contributions': current_peer_contributions # Added here
+                }
+        else: # Handle case where downloaded_files might not exist or be empty
+            logger.debug("No downloaded files found in file_manager or attribute missing.")
 
-            }
-            for file_hash, (file_info, downloaded_at) in self.file_manager.downloaded_files.items()
-        }
 
         shared = {
             file_hash: {
