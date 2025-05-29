@@ -4,7 +4,6 @@ import json
 import logging
 import socket
 import struct
-from typing import Tuple
 
 from .models import MULTICAST_GROUP, MULTICAST_PORT, MessageType, VERSION
 

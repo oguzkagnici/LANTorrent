@@ -5,7 +5,6 @@ import threading
 from pathlib import Path
 import logging
 import sys
-import os
 
 # Import core modules, adjust path if running directly
 try:
