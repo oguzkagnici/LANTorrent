@@ -1,11 +1,10 @@
 # lantorrent/core/app.py
+
 import asyncio
-import hashlib
 import logging
-import socket
 import time
 from pathlib import Path
-from typing import Optional, Dict, Set
+from typing import Optional
 import os
 import shutil
 
@@ -22,19 +21,18 @@ class LANTorrent:
     """Main application class for LAN Torrent."""
 
     def __init__(self, share_dir='./lantorrent/shared', download_dir='./lantorrent/downloads'):
-        # Initialize paths
+        # Set up directories for sharing and downloading files
         self.share_dir = Path(share_dir).resolve()
         self.download_dir = Path(download_dir).resolve()
         self.share_dir.mkdir(exist_ok=True, parents=True)
         self.download_dir.mkdir(exist_ok=True, parents=True)
 
-        # Create components
+        # Initialize core components
         self.peer_manager = PeerManager()
         self.file_manager = FileManager(str(self.share_dir), str(self.download_dir))
         self.discovery = MulticastDiscovery(self.peer_manager, self.file_manager)
         self.transfer = TransferProtocol(self.peer_manager, self.file_manager)
 
-        # Flags
         self.running = False
         self.tasks = []
 
@@ -45,13 +43,9 @@ class LANTorrent:
             return
 
         self.running = True
-
-        # Start components
         discovery_task = asyncio.create_task(self.discovery.start())
         transfer_task = asyncio.create_task(self.transfer.start())
-
         self.tasks = [discovery_task, transfer_task]
-        #logger.info("LAN Torrent started")
 
     async def stop(self):
         """Stop all system components."""
@@ -59,78 +53,69 @@ class LANTorrent:
             return
 
         self.running = False
-
-        # Stop components
         await self.discovery.stop()
         await self.transfer.stop()
 
-        # Cancel tasks
+        # Cancel running tasks
         for task in self.tasks:
             if not task.done():
                 task.cancel()
-        
-        # Wait for tasks to finish cancellation
         if self.tasks:
             await asyncio.gather(*self.tasks, return_exceptions=True)
-
         self.tasks = []
         logger.info("LAN Torrent stopped")
 
     async def add_file_to_share(self, file_path_str: str) -> Optional[FileInfo]:
-      """
-      Adds a file to the shared files list.
-      The file is copied to the application's share directory if it's not already there,
-      under its original name or a unique variant if a conflict exists.
-      The file is announced to peers.
-      """
-      original_file_path = Path(file_path_str).resolve()
-      if not original_file_path.exists() or not original_file_path.is_file():
-          logger.error(f"File not found or is not a file: {original_file_path}")
-          return None
+        """
+        Adds a file to the shared files list.
+        The file is copied to the application's share directory if it's not already there,
+        under its original name or a unique variant if a conflict exists.
+        The file is announced to peers.
+        """
+        original_file_path = Path(file_path_str).resolve()
+        if not original_file_path.exists() or not original_file_path.is_file():
+            logger.error(f"File not found or is not a file: {original_file_path}")
+            return None
 
-      original_file_name = original_file_path.name
+        original_file_name = original_file_path.name
+        dst_path = self.share_dir / original_file_name
+        name_base, ext = os.path.splitext(original_file_name)
+        counter = 1
 
-      # Determine the actual path for storing the file in the share directory.
-      dst_path = self.share_dir / original_file_name
-      name_base, ext = os.path.splitext(original_file_name)
-      counter = 1
+        # Avoid overwriting existing files in the share directory
+        while dst_path.exists():
+            new_name = f"{name_base}_{counter}{ext}"
+            dst_path = self.share_dir / new_name
+            counter += 1
 
-      # Avoid overwriting existing files
-      while dst_path.exists():
-          new_name = f"{name_base}_{counter}{ext}"
-          dst_path = self.share_dir / new_name
-          counter += 1
+        try:
+            if original_file_path != dst_path:
+                shutil.copy2(original_file_path, dst_path)
+                logger.info(f"Copied file to share directory: {dst_path}")
+            else:
+                logger.info(f"File is already in share directory: {dst_path}")
+        except Exception as e:
+            logger.error(f"Failed to copy file: {e}")
+            return None
 
-      # If original file isn't already at the target location, copy it
-      try:
-          if original_file_path != dst_path:
-              shutil.copy2(original_file_path, dst_path)
-              logger.info(f"Copied file to share directory: {dst_path}")
-          else:
-              logger.info(f"File is already in share directory: {dst_path}")
-      except Exception as e:
-          logger.error(f"Failed to copy file: {e}")
-          return None
+        # Add the file to the shared list
+        file_info = self.file_manager._add_shared_file(dst_path, original_file_name)
 
-      # Attempt to add the file to the shared list
-      file_info = self.file_manager._add_shared_file(dst_path, original_file_name)
-
-      if file_info:
-          logger.info(f"Sharing new file: {file_info.name} (hash: {file_info.hash})")
-          if self.running and self.discovery:
-              self.discovery._send_announce()
-              logger.info(f"Sent announce after adding {file_info.name}")
-          return file_info
-      else:
-          # Cleanup copied file if adding failed
-          if dst_path.exists() and dst_path != original_file_path:
-              try:
-                  os.remove(dst_path)
-                  logger.info(f"Removed copied file due to failed share: {dst_path}")
-              except Exception as cleanup_err:
-                  logger.error(f"Failed to remove copied file: {dst_path}, error: {cleanup_err}")
-          return None
-
+        if file_info:
+            logger.info(f"Sharing new file: {file_info.name} (hash: {file_info.hash})")
+            if self.running and self.discovery:
+                self.discovery._send_announce()
+                logger.info(f"Sent announce after adding {file_info.name}")
+            return file_info
+        else:
+            # Cleanup copied file if adding failed
+            if dst_path.exists() and dst_path != original_file_path:
+                try:
+                    os.remove(dst_path)
+                    logger.info(f"Removed copied file due to failed share: {dst_path}")
+                except Exception as cleanup_err:
+                    logger.error(f"Failed to remove copied file: {dst_path}, error: {cleanup_err}")
+            return None
 
     async def download_file(self, file_hash: str, auto_share: bool = True) -> bool:
         """Start downloading a file."""
@@ -145,33 +130,26 @@ class LANTorrent:
                     progress = len(self.file_manager.completed_chunks.get(file_hash, set())) / file_info.chunks
                 else:
                     progress = 1.0 if file_info.size == 0 else 0.0
-                
-                # Peer contributions are no longer added to 'downloading'
                 downloading[file_hash] = {
                     'name': file_info.name,
                     'size': file_info.size,
                     'progress': progress
-                    # No 'peer_contributions' field here anymore
                 }
 
         downloaded = {}
-        # Ensure self.file_manager.downloaded_files exists and is iterable
         if hasattr(self.file_manager, 'downloaded_files') and self.file_manager.downloaded_files:
             for file_hash, (file_info, downloaded_at) in self.file_manager.downloaded_files.items():
-                # Get peer contributions for downloaded files
                 current_peer_contributions = {}
                 if hasattr(self.transfer, 'get_peer_contributions_for_file'):
                     current_peer_contributions = self.transfer.get_peer_contributions_for_file(file_hash)
-                
                 downloaded[file_hash] = {
                     'name': file_info.name,
                     'size': file_info.size,
                     'downloaded_at': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(downloaded_at)),
-                    'peer_contributions': current_peer_contributions # Added here
+                    'peer_contributions': current_peer_contributions
                 }
-        else: # Handle case where downloaded_files might not exist or be empty
+        else:
             logger.debug("No downloaded files found in file_manager or attribute missing.")
-
 
         shared = {
             file_hash: {
@@ -200,7 +178,6 @@ class LANTorrent:
             'downloading': downloading,
             'downloaded': downloaded
         }
-
 
 async def main():
     """Main entry point for the LAN Torrent application."""
