@@ -1,4 +1,9 @@
-To run the app, multiple terminals are required for each device.
+Tor run the app on the gui, go to root directory of the project and execute
+```
+   python3 lantorrent/gui/main.py
+```
+
+To run the app on the cli, multiple terminals are required for each device.
 
 1. **Terminal 1**: Start the server
    ```bash
